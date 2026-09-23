@@ -1,11 +1,12 @@
 // ============================================================
-// GODAVARI BASIN - LULC 2015
+// GODAVARI BASIN - LULC 2016
 // Dynamic World
 // Training will be done later
 // ============================================================
 
 
 // 1. LOAD GODAVARI BASIN
+
 var basin = ee.FeatureCollection(
   "projects/fine-slice-478618-n5/assets/Godavari_Basin"
 );
@@ -23,13 +24,13 @@ Map.addLayer(
 );
 
 
-// 2. LOAD DYNAMIC WORLD 2015
+// 2. LOAD DYNAMIC WORLD 2016
 
-var dw2015 = ee.ImageCollection(
+var dw2016 = ee.ImageCollection(
   "GOOGLE/DYNAMICWORLD/V1"
 )
   .filterBounds(basin)
-  .filterDate("2015-06-27", "2016-01-01")
+  .filterDate("2016-01-01", "2017-01-01")
   .select("label")
   .mode()
   .clip(basin);
@@ -37,7 +38,7 @@ var dw2015 = ee.ImageCollection(
 
 // 3. PRINT INFORMATION
 
-print("Dynamic World 2015:", dw2015);
+print("Dynamic World 2016:", dw2016);
 
 
 // 4. DISPLAY ORIGINAL DYNAMIC WORLD
@@ -55,13 +56,13 @@ var dwPalette = [
 ];
 
 Map.addLayer(
-  dw2015,
+  dw2016,
   {
     min: 0,
     max: 8,
     palette: dwPalette
   },
-  "Dynamic World 2015"
+  "Dynamic World 2016"
 );
 
 
@@ -74,16 +75,16 @@ Map.addLayer(
 // 4 = Barren
 // 5 = Grassland/Wasteland
 
-var lulc2015 = ee.Image(0)
-  .where(dw2015.eq(0), 0)  // Water
-  .where(dw2015.eq(1), 1)  // Trees → Forest
-  .where(dw2015.eq(2), 5)  // Grass → Grassland
-  .where(dw2015.eq(3), 0)  // Flooded vegetation → Water
-  .where(dw2015.eq(4), 2)  // Crops → Agriculture
-  .where(dw2015.eq(5), 5)  // Shrub → Grassland
-  .where(dw2015.eq(6), 3)  // Built → Built-up
-  .where(dw2015.eq(7), 4)  // Bare → Barren
-  .where(dw2015.eq(8), 4)  // Snow/Ice → Barren
+var lulc2016 = ee.Image(0)
+  .where(dw2016.eq(0), 0)  // Water
+  .where(dw2016.eq(1), 1)  // Trees → Forest
+  .where(dw2016.eq(2), 5)  // Grass → Grassland
+  .where(dw2016.eq(3), 0)  // Flooded vegetation → Water
+  .where(dw2016.eq(4), 2)  // Crops → Agriculture
+  .where(dw2016.eq(5), 5)  // Shrub → Grassland
+  .where(dw2016.eq(6), 3)  // Built → Built-up
+  .where(dw2016.eq(7), 4)  // Bare → Barren
+  .where(dw2016.eq(8), 4)  // Snow/Ice → Barren
   .rename("LULC")
   .clip(basin);
 
@@ -100,13 +101,13 @@ var lulcPalette = [
 ];
 
 Map.addLayer(
-  lulc2015,
+  lulc2016,
   {
     min: 0,
     max: 5,
     palette: lulcPalette
   },
-  "Godavari LULC 2015"
+  "Godavari LULC 2016"
 );
 
 
@@ -114,9 +115,9 @@ Map.addLayer(
 
 var areaImage = ee.Image.pixelArea()
   .divide(10000)
-  .addBands(lulc2015);
+  .addBands(lulc2016);
 
-var area2015 = areaImage.reduceRegion({
+var area2016 = areaImage.reduceRegion({
 
   reducer: ee.Reducer.sum()
     .group({
@@ -136,8 +137,8 @@ var area2015 = areaImage.reduceRegion({
 });
 
 print(
-  "2015 LULC Area (hectares):",
-  area2015
+  "2016 LULC Area (hectares):",
+  area2016
 );
 
 
@@ -150,17 +151,17 @@ print(
 );
 
 
-// 9. EXPORT 2015 LULC
+// 9. EXPORT 2016 LULC
 
 Export.image.toDrive({
 
-  image: lulc2015.toByte(),
+  image: lulc2016.toByte(),
 
-  description: "Godavari_LULC_2015",
+  description: "Godavari_LULC_2016",
 
   folder: "Godavari_LULC",
 
-  fileNamePrefix: "Godavari_LULC_2015",
+  fileNamePrefix: "Godavari_LULC_2016",
 
   region: basin.geometry(),
 
@@ -169,3 +170,8 @@ Export.image.toDrive({
   maxPixels: 1e13
 
 });
+
+
+// ============================================================
+// END
+// ============================================================
