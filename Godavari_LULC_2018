@@ -1,5 +1,5 @@
 // ============================================================
-// GODAVARI BASIN - LULC 2017
+// GODAVARI BASIN - LULC 2018
 // Dynamic World
 // Training will be done later
 // ============================================================
@@ -24,13 +24,13 @@ Map.addLayer(
 );
 
 
-// 2. LOAD DYNAMIC WORLD 2017
+// 2. LOAD DYNAMIC WORLD 2018
 
-var dw2017 = ee.ImageCollection(
+var dw2018 = ee.ImageCollection(
   "GOOGLE/DYNAMICWORLD/V1"
 )
   .filterBounds(basin)
-  .filterDate("2017-01-01", "2018-01-01")
+  .filterDate("2018-01-01", "2019-01-01")
   .select("label")
   .mode()
   .clip(basin);
@@ -38,49 +38,33 @@ var dw2017 = ee.ImageCollection(
 
 // 3. PRINT INFORMATION
 
-print("Dynamic World 2017:", dw2017);
+print("Dynamic World 2018:", dw2018);
 
 
-// ============================================================
 // 4. CONVERT TO OUR 6 PROJECT CLASSES
-// ============================================================
-//
+
 // 0 = Water
 // 1 = Forest
 // 2 = Agriculture
 // 3 = Built-up
 // 4 = Barren
 // 5 = Grassland/Wasteland
-//
-// Dynamic World:
-// 0 = Water
-// 1 = Trees
-// 2 = Grass
-// 3 = Flooded vegetation
-// 4 = Crops
-// 5 = Shrub and scrub
-// 6 = Built
-// 7 = Bare
-// 8 = Snow/Ice
-// ============================================================
 
-var lulc2017 = ee.Image(0)
-  .where(dw2017.eq(0), 0)  // Water
-  .where(dw2017.eq(1), 1)  // Trees → Forest
-  .where(dw2017.eq(2), 5)  // Grass → Grassland
-  .where(dw2017.eq(3), 0)  // Flooded vegetation → Water
-  .where(dw2017.eq(4), 2)  // Crops → Agriculture
-  .where(dw2017.eq(5), 5)  // Shrub → Grassland
-  .where(dw2017.eq(6), 3)  // Built → Built-up
-  .where(dw2017.eq(7), 4)  // Bare → Barren
-  .where(dw2017.eq(8), 4)  // Snow/Ice → Barren
+var lulc2018 = ee.Image(0)
+  .where(dw2018.eq(0), 0)  // Water
+  .where(dw2018.eq(1), 1)  // Trees → Forest
+  .where(dw2018.eq(2), 5)  // Grass → Grassland
+  .where(dw2018.eq(3), 0)  // Flooded vegetation → Water
+  .where(dw2018.eq(4), 2)  // Crops → Agriculture
+  .where(dw2018.eq(5), 5)  // Shrub → Grassland
+  .where(dw2018.eq(6), 3)  // Built → Built-up
+  .where(dw2018.eq(7), 4)  // Bare → Barren
+  .where(dw2018.eq(8), 4)  // Snow/Ice → Barren
   .rename("LULC")
   .clip(basin);
 
 
-// ============================================================
 // 5. DISPLAY 6-CLASS LULC
-// ============================================================
 
 var lulcPalette = [
   "419BDF", // Water
@@ -92,25 +76,23 @@ var lulcPalette = [
 ];
 
 Map.addLayer(
-  lulc2017,
+  lulc2018,
   {
     min: 0,
     max: 5,
     palette: lulcPalette
   },
-  "Godavari LULC 2017"
+  "Godavari LULC 2018"
 );
 
 
-// ============================================================
 // 6. CALCULATE AREA
-// ============================================================
 
 var areaImage = ee.Image.pixelArea()
   .divide(10000)
-  .addBands(lulc2017);
+  .addBands(lulc2018);
 
-var area2017 = areaImage.reduceRegion({
+var area2018 = areaImage.reduceRegion({
 
   reducer: ee.Reducer.sum()
     .group({
@@ -130,14 +112,12 @@ var area2017 = areaImage.reduceRegion({
 });
 
 print(
-  "2017 LULC Area (hectares):",
-  area2017
+  "2018 LULC Area (hectares):",
+  area2018
 );
 
 
-// ============================================================
 // 7. CLASS INFORMATION
-// ============================================================
 
 print(
   "Classes:",
@@ -146,19 +126,17 @@ print(
 );
 
 
-// ============================================================
-// 8. EXPORT 2017 LULC
-// ============================================================
+// 8. EXPORT 2018 LULC
 
 Export.image.toDrive({
 
-  image: lulc2017.toByte(),
+  image: lulc2018.toByte(),
 
-  description: "Godavari_LULC_2017",
+  description: "Godavari_LULC_2018",
 
   folder: "Godavari_LULC",
 
-  fileNamePrefix: "Godavari_LULC_2017",
+  fileNamePrefix: "Godavari_LULC_2018",
 
   region: basin.geometry(),
 
