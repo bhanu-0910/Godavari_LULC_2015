@@ -1,0 +1,69 @@
+// ==========================================
+// GODAVARI BASIN - LANDSAT 2015 COMPOSITE
+// ==========================================
+
+// 1. Load Godavari Basin
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+// 2. Cloud and shadow masking function
+function maskLandsat(image) {
+  var qa = image.select("QA_PIXEL");
+
+  // Cloud shadow, cloud and cirrus bits
+  var cloudShadow = 1 << 4;
+  var cloud = 1 << 3;
+  var cirrus = 1 << 2;
+
+  var mask = qa.bitwiseAnd(cloudShadow).eq(0)
+    .and(qa.bitwiseAnd(cloud).eq(0))
+    .and(qa.bitwiseAnd(cirrus).eq(0));
+
+  // Apply Landsat Collection 2 surface-reflectance scaling
+  var optical = image.select("SR_B.*")
+    .multiply(0.0000275)
+    .add(-0.2);
+
+  return image
+    .addBands(optical, null, true)
+    .updateMask(mask);
+}
+
+// 3. Load Landsat 8
+var landsat2015 = ee.ImageCollection("LANDSAT/LC08/C02/T1_L2")
+  .filterBounds(basin)
+  .filterDate("2015-01-01", "2016-01-01")
+  .filter(ee.Filter.lt("CLOUD_COVER", 30))
+  .map(maskLandsat);
+
+// 4. Create median composite
+var image2015 = landsat2015
+  .median()
+  .clip(basin);
+
+// 5. True-color visualization
+var rgb = {
+  bands: ["SR_B4", "SR_B3", "SR_B2"],
+  min: 0.0,
+  max: 0.3
+};
+
+// 6. Display
+Map.centerObject(basin, 7);
+Map.addLayer(image2015, rgb, "Godavari Landsat 2015");
+
+// 7. Display basin boundary
+Map.addLayer(
+  basin.style({
+    color: "red",
+    fillColor: "00000000",
+    width: 2
+  }),
+  {},
+  "Godavari Basin Boundary"
+);
+
+// 8. Print information
+print("2015 Landsat image count:", landsat2015.size());
+print("2015 composite:", image2015);
