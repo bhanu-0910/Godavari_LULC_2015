@@ -1,0 +1,280 @@
+// ============================================================
+// GODAVARI BASIN - LULC COVERAGE VERIFICATION
+// 2015 - 2020
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. LOAD BASIN
+// ------------------------------------------------------------
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+
+// ------------------------------------------------------------
+// 2. DYNAMIC WORLD → 6 PROJECT CLASSES
+// ------------------------------------------------------------
+
+function getLULC(startDate, endDate) {
+
+  var dw = ee.ImageCollection(
+    "GOOGLE/DYNAMICWORLD/V1"
+  )
+  .filterDate(startDate, endDate)
+  .filterBounds(basin)
+  .select("label");
+
+  var dwMode = dw.mode();
+
+  var lulc = dwMode.remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  );
+
+  return lulc.clip(basin);
+}
+
+
+// ------------------------------------------------------------
+// 3. CREATE YEARLY LULC
+// ------------------------------------------------------------
+
+var lulc2015 = getLULC(
+  '2015-06-27',
+  '2016-01-01'
+);
+
+var lulc2016 = getLULC(
+  '2016-01-01',
+  '2017-01-01'
+);
+
+var lulc2017 = getLULC(
+  '2017-01-01',
+  '2018-01-01'
+);
+
+var lulc2018 = getLULC(
+  '2018-01-01',
+  '2019-01-01'
+);
+
+var lulc2019 = getLULC(
+  '2019-01-01',
+  '2020-01-01'
+);
+
+var lulc2020 = getLULC(
+  '2020-01-01',
+  '2021-01-01'
+);
+
+
+// ------------------------------------------------------------
+// 4. CALCULATE TOTAL BASIN AREA
+// ------------------------------------------------------------
+
+var basinArea = ee.Image.pixelArea()
+  .divide(10000)
+  .reduceRegion({
+
+    reducer: ee.Reducer.sum(),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+print(
+  'TOTAL GODAVARI BASIN AREA (ha)',
+  basinArea
+);
+
+
+// ------------------------------------------------------------
+// 5. FUNCTION TO CHECK COVERAGE
+// ------------------------------------------------------------
+
+function checkCoverage(image, year) {
+
+  // Pixel area only where LULC exists
+  var validAreaImage = ee.Image.pixelArea()
+    .divide(10000)
+    .updateMask(image.mask());
+
+  var validArea = validAreaImage.reduceRegion({
+
+    reducer: ee.Reducer.sum(),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+  var validHa = ee.Number(
+    validArea.get('area')
+  );
+
+  var totalHa = ee.Number(
+    basinArea.get('area')
+  );
+
+  var coverage = validHa
+    .divide(totalHa)
+    .multiply(100);
+
+  print(
+    '--------------------------------------'
+  );
+
+  print(
+    'YEAR',
+    year
+  );
+
+  print(
+    'Valid LULC Area (ha)',
+    validHa
+  );
+
+  print(
+    'Missing / Unmapped Area (ha)',
+    totalHa.subtract(validHa)
+  );
+
+  print(
+    'Coverage (%)',
+    coverage
+  );
+}
+
+
+// ------------------------------------------------------------
+// 6. CHECK ALL YEARS
+// ------------------------------------------------------------
+
+checkCoverage(
+  lulc2015,
+  2015
+);
+
+checkCoverage(
+  lulc2016,
+  2016
+);
+
+checkCoverage(
+  lulc2017,
+  2017
+);
+
+checkCoverage(
+  lulc2018,
+  2018
+);
+
+checkCoverage(
+  lulc2019,
+  2019
+);
+
+checkCoverage(
+  lulc2020,
+  2020
+);
+
+
+// ------------------------------------------------------------
+// 7. CREATE A COVERAGE IMAGE
+// ------------------------------------------------------------
+
+var coverage2015 = lulc2015.mask().selfMask();
+
+Map.addLayer(
+  coverage2015,
+  {palette: ['00FF00']},
+  'Valid LULC Pixels 2015'
+);
+
+
+// ------------------------------------------------------------
+// 8. CHECK CLASS AREA SUM
+// ------------------------------------------------------------
+
+function classAreaCheck(image, year) {
+
+  var areaImage = ee.Image.pixelArea()
+    .divide(10000)
+    .addBands(image);
+
+  var result = areaImage.reduceRegion({
+
+    reducer: ee.Reducer.sum().group({
+      groupField: 1,
+      groupName: 'class'
+    }),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+  print(
+    'CLASS AREA CHECK - ' + year,
+    result
+  );
+}
+
+
+// ------------------------------------------------------------
+// 9. CLASS AREA CHECK FOR 2015 AND 2020
+// ------------------------------------------------------------
+
+classAreaCheck(
+  lulc2015,
+  2015
+);
+
+classAreaCheck(
+  lulc2020,
+  2020
+);
+
+
+// ------------------------------------------------------------
+// 10. INFORMATION
+// ------------------------------------------------------------
+
+print('======================================');
+print('LULC COVERAGE VERIFICATION');
+print('======================================');
+print('0 = Water');
+print('1 = Forest');
+print('2 = Agriculture');
+print('3 = Built-up');
+print('4 = Barren');
+print('5 = Grassland/Wasteland');
+print('======================================');
