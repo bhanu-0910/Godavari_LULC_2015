@@ -1,0 +1,329 @@
+// ============================================================
+// GODAVARI BASIN - HISTORICAL LULC CHANGE ANALYSIS
+// Period: 2015 - 2020
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. LOAD GODAVARI BASIN
+// ------------------------------------------------------------
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+Map.addLayer(
+  basin,
+  {color: 'red'},
+  'Godavari Basin'
+);
+
+
+// ------------------------------------------------------------
+// 2. FUNCTION TO CREATE 6-CLASS LULC
+// ------------------------------------------------------------
+
+function getLULC(startDate, endDate) {
+
+  var dw = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+    .filterDate(startDate, endDate)
+    .filterBounds(basin)
+    .select("label");
+
+  // Annual modal Dynamic World class
+  var dwMode = dw.mode();
+
+  // Convert Dynamic World 9 classes
+  // into our 6 project classes
+
+  var lulc = dwMode.remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  );
+
+  return lulc.clip(basin);
+}
+
+
+// ------------------------------------------------------------
+// 3. CREATE LULC MAPS
+// ------------------------------------------------------------
+
+var lulc2015 = getLULC(
+  '2015-06-27',
+  '2016-01-01'
+);
+
+var lulc2016 = getLULC(
+  '2016-01-01',
+  '2017-01-01'
+);
+
+var lulc2017 = getLULC(
+  '2017-01-01',
+  '2018-01-01'
+);
+
+var lulc2018 = getLULC(
+  '2018-01-01',
+  '2019-01-01'
+);
+
+var lulc2019 = getLULC(
+  '2019-01-01',
+  '2020-01-01'
+);
+
+var lulc2020 = getLULC(
+  '2020-01-01',
+  '2021-01-01'
+);
+
+
+// ------------------------------------------------------------
+// 4. LULC CLASS NAMES
+// ------------------------------------------------------------
+
+var classNames = [
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland/Wasteland'
+];
+
+
+// ------------------------------------------------------------
+// 5. LULC DISPLAY COLORS
+// ------------------------------------------------------------
+
+var palette = [
+  '419BDF',  // Water
+  '397D49',  // Forest
+  'E49635',  // Agriculture
+  'C4281B',  // Built-up
+  'A59B8F',  // Barren
+  '88B053'   // Grassland/Wasteland
+];
+
+
+// ------------------------------------------------------------
+// 6. DISPLAY 2015 AND 2020
+// ------------------------------------------------------------
+
+Map.addLayer(
+  lulc2015,
+  {min: 0, max: 5, palette: palette},
+  'LULC 2015'
+);
+
+Map.addLayer(
+  lulc2020,
+  {min: 0, max: 5, palette: palette},
+  'LULC 2020'
+);
+
+
+// ------------------------------------------------------------
+// 7. FUNCTION TO CALCULATE AREA
+// ------------------------------------------------------------
+
+function calculateArea(image, year) {
+
+  var areaImage = ee.Image.pixelArea()
+    .divide(10000)
+    .addBands(image);
+
+  var area = areaImage.reduceRegion({
+    reducer: ee.Reducer.sum().group({
+      groupField: 1,
+      groupName: 'class'
+    }),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+  });
+
+  print(
+    'LULC Area - ' + year,
+    area
+  );
+
+  return area;
+}
+
+
+// ------------------------------------------------------------
+// 8. AREA FOR EACH YEAR
+// ------------------------------------------------------------
+
+var area2015 = calculateArea(lulc2015, 2015);
+
+var area2016 = calculateArea(lulc2016, 2016);
+
+var area2017 = calculateArea(lulc2017, 2017);
+
+var area2018 = calculateArea(lulc2018, 2018);
+
+var area2019 = calculateArea(lulc2019, 2019);
+
+var area2020 = calculateArea(lulc2020, 2020);
+
+
+// ------------------------------------------------------------
+// 9. 2015 → 2020 CHANGE MAP
+// ------------------------------------------------------------
+
+// Change only where classes are different
+
+var changeMap = lulc2015
+  .neq(lulc2020)
+  .selfMask();
+
+Map.addLayer(
+  changeMap,
+  {palette: ['FFFF00']},
+  'LULC Change 2015-2020'
+);
+
+
+// ------------------------------------------------------------
+// 10. TRANSITION MAP
+// ------------------------------------------------------------
+
+// Formula:
+// transition = 2015 class × 10 + 2020 class
+
+var transition = lulc2015
+  .multiply(10)
+  .add(lulc2020);
+
+Map.addLayer(
+  transition,
+  {
+    min: 0,
+    max: 55
+  },
+  '2015-2020 Transition'
+);
+
+
+// ------------------------------------------------------------
+// 11. TRANSITION MATRIX
+// ------------------------------------------------------------
+
+// Calculate area for every 2015 → 2020 transition
+
+var transitionArea = ee.Image.pixelArea()
+  .divide(10000)
+  .addBands(transition);
+
+var transitionResult = transitionArea.reduceRegion({
+
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'transition'
+  }),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+});
+
+print(
+  '2015 → 2020 Transition Matrix',
+  transitionResult
+);
+
+
+// ------------------------------------------------------------
+// 12. TOTAL CHANGED AREA
+// ------------------------------------------------------------
+
+var changedArea = ee.Image.pixelArea()
+  .divide(10000)
+  .updateMask(
+    lulc2015.neq(lulc2020)
+  );
+
+var totalChangedArea = changedArea.reduceRegion({
+
+  reducer: ee.Reducer.sum(),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+});
+
+print(
+  'Total Changed Area 2015-2020 (ha)',
+  totalChangedArea
+);
+
+
+// ------------------------------------------------------------
+// 13. TOTAL UNCHANGED AREA
+// ------------------------------------------------------------
+
+var unchangedArea = ee.Image.pixelArea()
+  .divide(10000)
+  .updateMask(
+    lulc2015.eq(lulc2020)
+  );
+
+var totalUnchangedArea = unchangedArea.reduceRegion({
+
+  reducer: ee.Reducer.sum(),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+});
+
+print(
+  'Total Unchanged Area 2015-2020 (ha)',
+  totalUnchangedArea
+);
+
+
+// ------------------------------------------------------------
+// 14. LEGEND
+// ------------------------------------------------------------
+
+print('-----------------------------------------');
+print('LULC CLASSIFICATION');
+print('0 = Water');
+print('1 = Forest');
+print('2 = Agriculture');
+print('3 = Built-up');
+print('4 = Barren');
+print('5 = Grassland/Wasteland');
+print('-----------------------------------------');
