@@ -1,0 +1,517 @@
+// ============================================================
+// GODAVARI BASIN - HISTORICAL LULC CHANGE ANALYSIS
+// Period: 2016 - 2020
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. LOAD GODAVARI BASIN
+// ------------------------------------------------------------
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+Map.addLayer(
+  basin,
+  {color: 'red'},
+  'Godavari Basin'
+);
+
+
+// ------------------------------------------------------------
+// 2. DYNAMIC WORLD → 6 PROJECT LULC CLASSES
+// ------------------------------------------------------------
+
+function getLULC(startDate, endDate) {
+
+  var dw = ee.ImageCollection(
+    "GOOGLE/DYNAMICWORLD/V1"
+  )
+  .filterDate(startDate, endDate)
+  .filterBounds(basin)
+  .select("label");
+
+  var dwMode = dw.mode();
+
+  var lulc = dwMode.remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  );
+
+  return lulc.clip(basin);
+}
+
+
+// ------------------------------------------------------------
+// 3. CREATE LULC MAPS
+// ------------------------------------------------------------
+
+var lulc2016 = getLULC(
+  '2016-01-01',
+  '2017-01-01'
+);
+
+var lulc2017 = getLULC(
+  '2017-01-01',
+  '2018-01-01'
+);
+
+var lulc2018 = getLULC(
+  '2018-01-01',
+  '2019-01-01'
+);
+
+var lulc2019 = getLULC(
+  '2019-01-01',
+  '2020-01-01'
+);
+
+var lulc2020 = getLULC(
+  '2020-01-01',
+  '2021-01-01'
+);
+
+
+// ------------------------------------------------------------
+// 4. CLASS NAMES
+// ------------------------------------------------------------
+
+var classNames = [
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland/Wasteland'
+];
+
+
+// ------------------------------------------------------------
+// 5. DISPLAY COLORS
+// ------------------------------------------------------------
+
+var palette = [
+  '419BDF',  // Water
+  '397D49',  // Forest
+  'E49635',  // Agriculture
+  'C4281B',  // Built-up
+  'A59B8F',  // Barren
+  '88B053'   // Grassland/Wasteland
+];
+
+
+// ------------------------------------------------------------
+// 6. DISPLAY 2016 AND 2020
+// ------------------------------------------------------------
+
+Map.addLayer(
+  lulc2016,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'LULC 2016'
+);
+
+Map.addLayer(
+  lulc2020,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'LULC 2020'
+);
+
+
+// ------------------------------------------------------------
+// 7. AREA CALCULATION FUNCTION
+// ------------------------------------------------------------
+
+function calculateArea(image, year) {
+
+  var areaImage = ee.Image.pixelArea()
+    .divide(10000)
+    .addBands(image);
+
+  var area = areaImage.reduceRegion({
+
+    reducer: ee.Reducer.sum().group({
+      groupField: 1,
+      groupName: 'class'
+    }),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+  print(
+    'LULC Area - ' + year,
+    area
+  );
+
+  return area;
+}
+
+
+// ------------------------------------------------------------
+// 8. AREA FOR EACH YEAR
+// ------------------------------------------------------------
+
+var area2016 = calculateArea(
+  lulc2016,
+  2016
+);
+
+var area2017 = calculateArea(
+  lulc2017,
+  2017
+);
+
+var area2018 = calculateArea(
+  lulc2018,
+  2018
+);
+
+var area2019 = calculateArea(
+  lulc2019,
+  2019
+);
+
+var area2020 = calculateArea(
+  lulc2020,
+  2020
+);
+
+
+// ------------------------------------------------------------
+// 9. FUNCTION FOR CHANGE MAP
+// ------------------------------------------------------------
+
+function createChangeMap(
+  image1,
+  image2,
+  year1,
+  year2
+) {
+
+  var change = image1
+    .neq(image2)
+    .selfMask();
+
+  Map.addLayer(
+    change,
+    {palette: ['FFFF00']},
+    'Change ' + year1 + '-' + year2
+  );
+
+  return change;
+}
+
+
+// ------------------------------------------------------------
+// 10. ANNUAL CHANGE MAPS
+// ------------------------------------------------------------
+
+var change1617 = createChangeMap(
+  lulc2016,
+  lulc2017,
+  2016,
+  2017
+);
+
+var change1718 = createChangeMap(
+  lulc2017,
+  lulc2018,
+  2017,
+  2018
+);
+
+var change1819 = createChangeMap(
+  lulc2018,
+  lulc2019,
+  2018,
+  2019
+);
+
+var change1920 = createChangeMap(
+  lulc2019,
+  lulc2020,
+  2019,
+  2020
+);
+
+
+// ------------------------------------------------------------
+// 11. FUNCTION FOR TOTAL CHANGED AREA
+// ------------------------------------------------------------
+
+function calculateChangedArea(
+  image1,
+  image2,
+  year1,
+  year2
+) {
+
+  var changedArea = ee.Image.pixelArea()
+    .divide(10000)
+    .updateMask(
+      image1.neq(image2)
+    );
+
+  var result = changedArea.reduceRegion({
+
+    reducer: ee.Reducer.sum(),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+  print(
+    'Changed Area ' +
+    year1 +
+    '-' +
+    year2 +
+    ' (ha)',
+    result
+  );
+
+  return result;
+}
+
+
+// ------------------------------------------------------------
+// 12. CALCULATE ANNUAL CHANGES
+// ------------------------------------------------------------
+
+calculateChangedArea(
+  lulc2016,
+  lulc2017,
+  2016,
+  2017
+);
+
+calculateChangedArea(
+  lulc2017,
+  lulc2018,
+  2017,
+  2018
+);
+
+calculateChangedArea(
+  lulc2018,
+  lulc2019,
+  2018,
+  2019
+);
+
+calculateChangedArea(
+  lulc2019,
+  lulc2020,
+  2019,
+  2020
+);
+
+
+// ------------------------------------------------------------
+// 13. TRANSITION MATRIX FUNCTION
+// ------------------------------------------------------------
+
+function transitionMatrix(
+  image1,
+  image2,
+  year1,
+  year2
+) {
+
+  // Example:
+  // 1 → 2 becomes 12
+  // 5 → 3 becomes 53
+
+  var transition = image1
+    .multiply(10)
+    .add(image2);
+
+  var transitionArea = ee.Image.pixelArea()
+    .divide(10000)
+    .addBands(transition);
+
+  var result = transitionArea.reduceRegion({
+
+    reducer: ee.Reducer.sum().group({
+      groupField: 1,
+      groupName: 'transition'
+    }),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+  print(
+    'Transition Matrix ' +
+    year1 +
+    ' -> ' +
+    year2,
+    result
+  );
+
+  return result;
+}
+
+
+// ------------------------------------------------------------
+// 14. TRANSITION MATRICES
+// ------------------------------------------------------------
+
+transitionMatrix(
+  lulc2016,
+  lulc2017,
+  2016,
+  2017
+);
+
+transitionMatrix(
+  lulc2017,
+  lulc2018,
+  2017,
+  2018
+);
+
+transitionMatrix(
+  lulc2018,
+  lulc2019,
+  2018,
+  2019
+);
+
+transitionMatrix(
+  lulc2019,
+  lulc2020,
+  2019,
+  2020
+);
+
+
+// ------------------------------------------------------------
+// 15. OVERALL 2016 → 2020 CHANGE
+// ------------------------------------------------------------
+
+var overallChange = lulc2016
+  .neq(lulc2020)
+  .selfMask();
+
+Map.addLayer(
+  overallChange,
+  {palette: ['FF00FF']},
+  'Overall Change 2016-2020'
+);
+
+
+// ------------------------------------------------------------
+// 16. TOTAL 2016 → 2020 CHANGED AREA
+// ------------------------------------------------------------
+
+var totalChangedArea = ee.Image.pixelArea()
+  .divide(10000)
+  .updateMask(
+    lulc2016.neq(lulc2020)
+  );
+
+var totalChanged = totalChangedArea.reduceRegion({
+
+  reducer: ee.Reducer.sum(),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+
+});
+
+print(
+  'TOTAL CHANGED AREA 2016-2020 (ha)',
+  totalChanged
+);
+
+
+// ------------------------------------------------------------
+// 17. TOTAL 2016 → 2020 UNCHANGED AREA
+// ------------------------------------------------------------
+
+var totalUnchangedArea = ee.Image.pixelArea()
+  .divide(10000)
+  .updateMask(
+    lulc2016.eq(lulc2020)
+  );
+
+var totalUnchanged = totalUnchangedArea.reduceRegion({
+
+  reducer: ee.Reducer.sum(),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+
+});
+
+print(
+  'TOTAL UNCHANGED AREA 2016-2020 (ha)',
+  totalUnchanged
+);
+
+
+// ------------------------------------------------------------
+// 18. CLASS INFORMATION
+// ------------------------------------------------------------
+
+print('======================================');
+
+print('LULC CLASSIFICATION');
+
+print('0 = Water');
+print('1 = Forest');
+print('2 = Agriculture');
+print('3 = Built-up');
+print('4 = Barren');
+print('5 = Grassland/Wasteland');
+
+print('======================================');
