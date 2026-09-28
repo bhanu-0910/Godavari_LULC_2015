@@ -1,0 +1,238 @@
+// ============================================================
+// GODAVARI BASIN - 2015 LULC COVERAGE FIX
+// ============================================================
+
+// 1. Load basin
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+
+// ============================================================
+// 2. GET DYNAMIC WORLD 2015 DATA
+// ============================================================
+
+// Dynamic World began on 27 June 2015.
+// We use the complete available 2015 period.
+
+var dw = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+  .filterDate('2015-06-27', '2016-01-01')
+  .filterBounds(basin);
+
+print('Number of Dynamic World images:', dw.size());
+
+
+// ============================================================
+// 3. CREATE 2015 LULC
+// ============================================================
+
+// First try the modal class
+var modeLULC = dw
+  .select('label')
+  .mode();
+
+
+// Create a mosaic to fill pixels where the modal image
+// does not have a valid observation
+var mosaicLULC = dw
+  .select('label')
+  .mosaic();
+
+
+// Fill only the missing pixels of the modal image
+var filledLULC = modeLULC.unmask(mosaicLULC);
+
+
+// ============================================================
+// 4. CONVERT DYNAMIC WORLD TO OUR 6 CLASSES
+// ============================================================
+
+// Dynamic World:
+// 0 Water
+// 1 Trees
+// 2 Grass
+// 3 Flooded vegetation
+// 4 Crops
+// 5 Shrub and scrub
+// 6 Built
+// 7 Bare
+// 8 Snow/Ice
+
+// Project classes:
+// 0 Water
+// 1 Forest
+// 2 Agriculture
+// 3 Built-up
+// 4 Barren
+// 5 Grassland/Wasteland
+
+var lulc2015 = filledLULC.remap(
+  [0, 1, 2, 3, 4, 5, 6, 7, 8],
+  [0, 1, 5, 0, 2, 5, 3, 4, 4]
+).clip(basin);
+
+
+// ============================================================
+// 5. DISPLAY
+// ============================================================
+
+var palette = [
+  '419BDF',  // Water
+  '397D49',  // Forest
+  'E49635',  // Agriculture
+  'C4281B',  // Built-up
+  'A59B8F',  // Barren
+  '88B053'   // Grassland/Wasteland
+];
+
+Map.addLayer(
+  lulc2015,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'FIXED LULC 2015'
+);
+
+
+// ============================================================
+// 6. CALCULATE BASIN AREA
+// ============================================================
+
+var basinArea = ee.Image.pixelArea()
+  .divide(10000)
+  .reduceRegion({
+
+    reducer: ee.Reducer.sum(),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+print(
+  'TOTAL GODAVARI BASIN AREA (ha)',
+  basinArea
+);
+
+
+// ============================================================
+// 7. CHECK VALID COVERAGE
+// ============================================================
+
+var validAreaImage = ee.Image.pixelArea()
+  .divide(10000)
+  .updateMask(lulc2015.mask());
+
+var validArea = validAreaImage.reduceRegion({
+
+  reducer: ee.Reducer.sum(),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+
+});
+
+var validHa = ee.Number(
+  validArea.get('area')
+);
+
+var totalHa = ee.Number(
+  basinArea.get('area')
+);
+
+var missingHa = totalHa.subtract(validHa);
+
+var coverage = validHa
+  .divide(totalHa)
+  .multiply(100);
+
+print('----------------------------------');
+
+print(
+  '2015 VALID LULC AREA (ha)',
+  validHa
+);
+
+print(
+  '2015 MISSING AREA (ha)',
+  missingHa
+);
+
+print(
+  '2015 COVERAGE (%)',
+  coverage
+);
+
+print('----------------------------------');
+
+
+// ============================================================
+// 8. CLASS AREA
+// ============================================================
+
+var areaImage = ee.Image.pixelArea()
+  .divide(10000)
+  .addBands(lulc2015);
+
+var classAreas = areaImage.reduceRegion({
+
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'class'
+  }),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+
+});
+
+print(
+  'FIXED 2015 CLASS AREAS',
+  classAreas
+);
+
+
+// ============================================================
+// 9. EXPORT FIXED 2015 LULC
+// ============================================================
+
+Export.image.toDrive({
+
+  image: lulc2015,
+
+  description: 'Godavari_LULC_2015_FIXED',
+
+  folder: 'Godavari_LULC',
+
+  fileNamePrefix: 'Godavari_LULC_2015_FIXED',
+
+  region: basin.geometry(),
+
+  scale: 10,
+
+  maxPixels: 1e13
+
+});
