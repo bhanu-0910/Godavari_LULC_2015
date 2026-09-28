@@ -1,0 +1,234 @@
+// ============================================================
+// GODAVARI BASIN - LULC ACCURACY ASSESSMENT
+// Year: 2020
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. LOAD GODAVARI BASIN
+// ------------------------------------------------------------
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+
+// ------------------------------------------------------------
+// 2. CREATE OUR 2020 DYNAMIC WORLD LULC
+// ------------------------------------------------------------
+
+var dw = ee.ImageCollection(
+  "GOOGLE/DYNAMICWORLD/V1"
+)
+.filterDate(
+  '2020-01-01',
+  '2021-01-01'
+)
+.filterBounds(basin)
+.select('label');
+
+var dwMode = dw.mode();
+
+
+// Dynamic World → our 6 classes
+//
+// 0 Water
+// 1 Forest
+// 2 Agriculture
+// 3 Built-up
+// 4 Barren
+// 5 Grassland/Wasteland
+
+var lulc2020 = dwMode.remap(
+  [0, 1, 2, 3, 4, 5, 6, 7, 8],
+  [0, 1, 5, 0, 2, 5, 3, 4, 4]
+).clip(basin);
+
+
+// ------------------------------------------------------------
+// 3. LOAD ESA WORLDCOVER 2020
+// ------------------------------------------------------------
+
+var worldcover = ee.Image(
+  "ESA/WorldCover/v100/2020"
+).select('Map').clip(basin);
+
+
+// ------------------------------------------------------------
+// 4. CONVERT WORLDCOVER TO OUR 6 CLASSES
+// ------------------------------------------------------------
+
+// ESA WorldCover:
+//
+// 10 = Tree cover
+// 20 = Shrubland
+// 30 = Grassland
+// 40 = Cropland
+// 50 = Built-up
+// 60 = Bare / sparse vegetation
+// 80 = Permanent water
+// 90 = Herbaceous wetland
+// 95 = Mangroves
+// 100 = Moss / lichen
+//
+// Our classes:
+//
+// 0 = Water
+// 1 = Forest
+// 2 = Agriculture
+// 3 = Built-up
+// 4 = Barren
+// 5 = Grassland/Wasteland
+
+var reference2020 = worldcover.remap(
+
+  [10, 20, 30, 40, 50, 60, 80, 90, 95, 100],
+
+  [1, 5, 5, 2, 3, 4, 0, 0, 1, 5]
+
+).rename('reference');
+
+
+// ------------------------------------------------------------
+// 5. DISPLAY BOTH DATASETS
+// ------------------------------------------------------------
+
+var palette = [
+  '419BDF',  // Water
+  '397D49',  // Forest
+  'E49635',  // Agriculture
+  'C4281B',  // Built-up
+  'A59B8F',  // Barren
+  '88B053'   // Grassland/Wasteland
+];
+
+Map.addLayer(
+  lulc2020,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'Our LULC 2020'
+);
+
+Map.addLayer(
+  reference2020,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'ESA WorldCover Reference 2020'
+);
+
+
+// ------------------------------------------------------------
+// 6. CREATE RANDOM VALIDATION SAMPLES
+// ------------------------------------------------------------
+
+// Combine our classification and reference data
+
+var validationImage = lulc2020
+  .rename('classified')
+  .addBands(reference2020);
+
+
+// Generate random points across basin
+
+var samples = validationImage.sample({
+
+  region: basin.geometry(),
+
+  scale: 10,
+
+  numPixels: 5000,
+
+  seed: 42,
+
+  geometries: true
+
+});
+
+print(
+  'Validation Samples',
+  samples
+);
+
+print(
+  'Number of Validation Samples',
+  samples.size()
+);
+
+
+// ------------------------------------------------------------
+// 7. CONFUSION MATRIX
+// ------------------------------------------------------------
+
+var confusionMatrix = samples.errorMatrix(
+  'reference',
+  'classified'
+);
+
+print(
+  'CONFUSION MATRIX',
+  confusionMatrix
+);
+
+
+// ------------------------------------------------------------
+// 8. OVERALL ACCURACY
+// ------------------------------------------------------------
+
+print(
+  'OVERALL ACCURACY',
+  confusionMatrix.accuracy()
+);
+
+
+// ------------------------------------------------------------
+// 9. KAPPA
+// ------------------------------------------------------------
+
+print(
+  'KAPPA',
+  confusionMatrix.kappa()
+);
+
+
+// ------------------------------------------------------------
+// 10. PRODUCER ACCURACY
+// ------------------------------------------------------------
+
+print(
+  'PRODUCER ACCURACY',
+  confusionMatrix.producersAccuracy()
+);
+
+
+// ------------------------------------------------------------
+// 11. USER ACCURACY
+// ------------------------------------------------------------
+
+print(
+  'USER ACCURACY',
+  confusionMatrix.consumersAccuracy()
+);
+
+
+// ------------------------------------------------------------
+// 12. CLASS INFORMATION
+// ------------------------------------------------------------
+
+print('======================================');
+
+print('CLASS 0 = WATER');
+print('CLASS 1 = FOREST');
+print('CLASS 2 = AGRICULTURE');
+print('CLASS 3 = BUILT-UP');
+print('CLASS 4 = BARREN');
+print('CLASS 5 = GRASSLAND/WASTELAND');
+
+print('======================================');
