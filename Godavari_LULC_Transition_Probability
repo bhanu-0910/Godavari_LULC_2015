@@ -1,11 +1,11 @@
 // ============================================================
 // GODAVARI BASIN - LULC TRANSITION PROBABILITY
-// Base period: 2016 -> 2020
+// Base Period: 2016 -> 2020
 // ============================================================
 
 
 // ------------------------------------------------------------
-// 1. LOAD BASIN
+// 1. LOAD GODAVARI BASIN
 // ------------------------------------------------------------
 
 var basin = ee.FeatureCollection(
@@ -53,28 +53,60 @@ var lulc2020 = getLULC(
 
 
 // ------------------------------------------------------------
-// 4. CREATE TRANSITION CODE
+// 4. LULC COLORS
 // ------------------------------------------------------------
 
-// Example:
-// 0 -> 0 = 0
-// 1 -> 2 = 12
-// 5 -> 3 = 53
+var palette = [
+  '419BDF',  // Water
+  '397D49',  // Forest
+  'E49635',  // Agriculture
+  'C4281B',  // Built-up
+  'A59B8F',  // Barren
+  '88B053'   // Grassland/Wasteland
+];
+
+
+// ------------------------------------------------------------
+// 5. DISPLAY 2020 LULC
+// ------------------------------------------------------------
+
+Map.addLayer(
+  lulc2020,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'LULC 2020'
+);
+
+
+// ------------------------------------------------------------
+// 6. CREATE TRANSITION IMAGE
+// ------------------------------------------------------------
+
+// 2016 class × 10 + 2020 class
+//
+// 0  = Water -> Water
+// 12 = Forest -> Agriculture
+// 23 = Agriculture -> Built-up
+// 52 = Grassland -> Agriculture
 
 var transition = lulc2016
   .multiply(10)
-  .add(lulc2020);
+  .add(lulc2020)
+  .rename('transition');
 
 
 // ------------------------------------------------------------
-// 5. CALCULATE TRANSITION AREAS
+// 7. CALCULATE TRANSITION AREAS
 // ------------------------------------------------------------
 
-var transitionArea = ee.Image.pixelArea()
+var transitionAreaImage = ee.Image.pixelArea()
   .divide(10000)
   .addBands(transition);
 
-var transitionResult = transitionArea.reduceRegion({
+var transitionResult = transitionAreaImage.reduceRegion({
 
   reducer: ee.Reducer.sum().group({
     groupField: 1,
@@ -100,77 +132,118 @@ print(
 
 
 // ------------------------------------------------------------
-// 6. CREATE TRANSITION AREA MATRIX
+// 8. GET GROUPED RESULTS
 // ------------------------------------------------------------
-
-// Convert grouped result into a dictionary
 
 var groups = ee.List(
   transitionResult.get('groups')
 );
 
 
-// Create a 6 x 6 matrix
+// ------------------------------------------------------------
+// 9. CREATE DICTIONARY
+// ------------------------------------------------------------
 
-var transitionMatrix = ee.List.sequence(0, 5)
-  .map(function(fromClass) {
+// IMPORTANT:
+// Force transition code to integer string.
+// This avoids the zero-matrix problem.
 
-    fromClass = ee.Number(fromClass);
+var transitionDictionary = ee.Dictionary(
+  groups.iterate(
 
-    return ee.List.sequence(0, 5)
-      .map(function(toClass) {
+    function(item, dictionary) {
 
-        toClass = ee.Number(toClass);
+      item = ee.Dictionary(item);
 
-        var code = fromClass
-          .multiply(10)
-          .add(toClass);
+      dictionary = ee.Dictionary(dictionary);
 
-        var match = groups.filter(
-          ee.Filter.eq(
-            'transition',
-            code
-          )
-        );
+      var transitionCode = ee.Number(
+        item.get('transition')
+      ).toInt();
 
-        var area = ee.Algorithms.If(
-          ee.List(match).size().gt(0),
+      var area = ee.Number(
+        item.get('sum')
+      );
 
-          ee.Dictionary(
-            ee.List(match).get(0)
-          ).get('sum'),
+      return dictionary.set(
+        transitionCode.format('%d'),
+        area
+      );
 
-          0
-        );
+    },
 
-        return ee.Number(area);
-
-      });
-
-  });
+    ee.Dictionary({})
+  )
+);
 
 
 print(
-  'TRANSITION AREA MATRIX (ha)',
-  transitionMatrix
+  'TRANSITION DICTIONARY',
+  transitionDictionary
 );
 
 
 // ------------------------------------------------------------
-// 7. CONVERT TRANSITION AREAS TO PROBABILITIES
+// 10. FUNCTION TO GET TRANSITION AREA
 // ------------------------------------------------------------
 
-// Each row is divided by its row total.
-// Therefore every row should sum approximately to 1.
+function getTransitionArea(fromClass, toClass) {
 
-// Example:
-//
-// Forest -> Water
-// Forest -> Forest
-// Forest -> Agriculture
-// etc.
+  var code = ee.Number(fromClass)
+    .multiply(10)
+    .add(ee.Number(toClass))
+    .toInt()
+    .format('%d');
 
-var probabilityMatrix = transitionMatrix.map(
+  return ee.Number(
+    transitionDictionary.get(
+      code,
+      0
+    )
+  );
+}
+
+
+// ------------------------------------------------------------
+// 11. CREATE 6 × 6 AREA MATRIX
+// ------------------------------------------------------------
+
+var transitionAreaMatrix = ee.List.sequence(0, 5)
+  .map(
+
+    function(fromClass) {
+
+      return ee.List.sequence(0, 5)
+        .map(
+
+          function(toClass) {
+
+            return getTransitionArea(
+              fromClass,
+              toClass
+            );
+
+          }
+
+        );
+
+    }
+
+  );
+
+
+print(
+  '2016 -> 2020 TRANSITION AREA MATRIX (ha)',
+  transitionAreaMatrix
+);
+
+
+// ------------------------------------------------------------
+// 12. CREATE PROBABILITY MATRIX
+// ------------------------------------------------------------
+
+var probabilityMatrix = transitionAreaMatrix.map(
+
   function(row) {
 
     row = ee.List(row);
@@ -180,26 +253,29 @@ var probabilityMatrix = transitionMatrix.map(
     );
 
     return row.map(
+
       function(value) {
 
         value = ee.Number(value);
 
         return ee.Algorithms.If(
+
           rowTotal.gt(0),
+
           value.divide(rowTotal),
+
           0
+
         );
 
       }
+
     );
 
   }
+
 );
 
-
-// ------------------------------------------------------------
-// 8. PRINT PROBABILITY MATRIX
-// ------------------------------------------------------------
 
 print(
   '2016 -> 2020 TRANSITION PROBABILITY MATRIX',
@@ -208,7 +284,32 @@ print(
 
 
 // ------------------------------------------------------------
-// 9. CLASS INFORMATION
+// 13. CHECK PROBABILITY ROW TOTALS
+// ------------------------------------------------------------
+
+var rowTotals = probabilityMatrix.map(
+
+  function(row) {
+
+    return ee.Number(
+      ee.List(row).reduce(
+        ee.Reducer.sum()
+      )
+    );
+
+  }
+
+);
+
+
+print(
+  'PROBABILITY ROW TOTALS',
+  rowTotals
+);
+
+
+// ------------------------------------------------------------
+// 14. CLASS NAMES
 // ------------------------------------------------------------
 
 print('==========================================');
@@ -224,24 +325,73 @@ print('==========================================');
 
 
 // ------------------------------------------------------------
-// 10. VISUALIZE 2020 LULC
+// 15. 2016 CLASS AREAS
 // ------------------------------------------------------------
 
-var palette = [
-  '419BDF',
-  '397D49',
-  'E49635',
-  'C4281B',
-  'A59B8F',
-  '88B053'
-];
+var area2016Image = ee.Image.pixelArea()
+  .divide(10000)
+  .addBands(lulc2016);
 
-Map.addLayer(
-  lulc2020,
-  {
-    min: 0,
-    max: 5,
-    palette: palette
-  },
-  'LULC 2020'
+var area2016Result = area2016Image.reduceRegion({
+
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'class'
+  }),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+
+});
+
+
+print(
+  '2016 CLASS AREAS (ha)',
+  area2016Result
 );
+
+
+// ------------------------------------------------------------
+// 16. 2020 CLASS AREAS
+// ------------------------------------------------------------
+
+var area2020Image = ee.Image.pixelArea()
+  .divide(10000)
+  .addBands(lulc2020);
+
+var area2020Result = area2020Image.reduceRegion({
+
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'class'
+  }),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+
+});
+
+
+print(
+  '2020 CLASS AREAS (ha)',
+  area2020Result
+);
+
+
+// ============================================================
+// END
+// ============================================================
