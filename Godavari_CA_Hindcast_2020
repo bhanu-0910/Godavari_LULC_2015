@@ -1,6 +1,6 @@
 // ============================================================
 // GODAVARI BASIN - CA HINDCAST 2020
-// CA-Markov style spatial allocation
+// ============================================================
 //
 // Base LULC       : 2018
 // Transition data : 2016 -> 2018
@@ -14,6 +14,13 @@
 // 3 = Built-up
 // 4 = Barren
 // 5 = Grassland/Wasteland
+//
+// Validation:
+// Overall Accuracy
+// Kappa
+// Producer Accuracy
+// User Accuracy
+// Figure of Merit
 // ============================================================
 
 
@@ -51,7 +58,7 @@ function getLULC(startDate, endDate) {
 
 
 // ============================================================
-// 3. CREATE 2016, 2018 AND ACTUAL 2020 LULC
+// 3. CREATE LULC MAPS
 // ============================================================
 
 var lulc2016 = getLULC(
@@ -71,7 +78,21 @@ var actual2020 = getLULC(
 
 
 // ============================================================
-// 4. CREATE 2016 -> 2018 TRANSITION PROBABILITY MATRIX
+// 4. LULC DISPLAY COLORS
+// ============================================================
+
+var palette = [
+  "419BDF",  // Water
+  "397D49",  // Forest
+  "E49635",  // Agriculture
+  "C4281B",  // Built-up
+  "A59B8F",  // Barren
+  "88B053"   // Grassland/Wasteland
+];
+
+
+// ============================================================
+// 5. 2016 -> 2018 TRANSITION IMAGE
 // ============================================================
 
 var transition2016_2018 = lulc2016
@@ -79,37 +100,50 @@ var transition2016_2018 = lulc2016
   .add(lulc2018)
   .rename("transition");
 
+
+// ============================================================
+// 6. CALCULATE TRANSITION AREAS
+// ============================================================
+
 var transitionAreaImage = ee.Image.pixelArea()
   .divide(10000)
   .addBands(transition2016_2018);
 
-var transitionResult = transitionAreaImage.reduceRegion({
+var transitionResult =
+  transitionAreaImage.reduceRegion({
 
-  reducer: ee.Reducer.sum().group({
-    groupField: 1,
-    groupName: "transition"
-  }),
+    reducer: ee.Reducer.sum().group({
+      groupField: 1,
+      groupName: "transition"
+    }),
 
-  geometry: basin.geometry(),
+    geometry: basin.geometry(),
 
-  scale: 100,
+    scale: 100,
 
-  bestEffort: true,
+    bestEffort: true,
 
-  maxPixels: 1e13,
+    maxPixels: 1e13,
 
-  tileScale: 4
+    tileScale: 4
 
-});
+  });
+
+
+print(
+  "2016 -> 2018 TRANSITION AREAS (ha)",
+  transitionResult
+);
 
 
 // ============================================================
-// 5. CREATE TRANSITION DICTIONARY
+// 7. CREATE TRANSITION DICTIONARY
 // ============================================================
 
 var groups = ee.List(
   transitionResult.get("groups")
 );
+
 
 var transitionDictionary = ee.Dictionary(
   groups.iterate(
@@ -117,6 +151,7 @@ var transitionDictionary = ee.Dictionary(
     function(item, dictionary) {
 
       item = ee.Dictionary(item);
+
       dictionary = ee.Dictionary(dictionary);
 
       var code = ee.Number(
@@ -141,8 +176,14 @@ var transitionDictionary = ee.Dictionary(
 );
 
 
+print(
+  "TRANSITION DICTIONARY",
+  transitionDictionary
+);
+
+
 // ============================================================
-// 6. FUNCTION TO GET TRANSITION AREA
+// 8. FUNCTION TO GET TRANSITION AREA
 // ============================================================
 
 function getTransitionArea(
@@ -152,7 +193,9 @@ function getTransitionArea(
 
   var code = ee.Number(fromClass)
     .multiply(10)
-    .add(ee.Number(toClass))
+    .add(
+      ee.Number(toClass)
+    )
     .toInt()
     .format("%d");
 
@@ -166,50 +209,80 @@ function getTransitionArea(
 
 
 // ============================================================
-// 7. CREATE TRANSITION PROBABILITY MATRIX
+// 9. CREATE TRANSITION AREA MATRIX
 // ============================================================
 
 var transitionAreaMatrix =
   ee.List.sequence(0, 5)
-  .map(function(fromClass) {
+  .map(
 
-    return ee.List.sequence(0, 5)
-      .map(function(toClass) {
+    function(fromClass) {
 
-        return getTransitionArea(
-          fromClass,
-          toClass
+      return ee.List.sequence(0, 5)
+        .map(
+
+          function(toClass) {
+
+            return getTransitionArea(
+              fromClass,
+              toClass
+            );
+
+          }
+
         );
 
-      });
+    }
 
-  });
+  );
 
+
+print(
+  "2016 -> 2018 TRANSITION AREA MATRIX (ha)",
+  transitionAreaMatrix
+);
+
+
+// ============================================================
+// 10. CREATE TRANSITION PROBABILITY MATRIX
+// ============================================================
 
 var transitionProbabilityMatrix =
-  transitionAreaMatrix.map(function(row) {
+  transitionAreaMatrix.map(
 
-    row = ee.List(row);
+    function(row) {
 
-    var rowTotal = ee.Number(
-      row.reduce(
-        ee.Reducer.sum()
-      )
-    );
+      row = ee.List(row);
 
-    return row.map(function(value) {
-
-      value = ee.Number(value);
-
-      return ee.Algorithms.If(
-        rowTotal.gt(0),
-        value.divide(rowTotal),
-        0
+      var rowTotal = ee.Number(
+        row.reduce(
+          ee.Reducer.sum()
+        )
       );
 
-    });
+      return row.map(
 
-  });
+        function(value) {
+
+          value = ee.Number(value);
+
+          return ee.Algorithms.If(
+
+            rowTotal.gt(0),
+
+            value.divide(rowTotal),
+
+            0
+
+          );
+
+        }
+
+      );
+
+    }
+
+  );
 
 
 print(
@@ -219,86 +292,146 @@ print(
 
 
 // ============================================================
-// 8. CREATE NEIGHBORHOOD FRACTIONS FROM 2018
+// 11. CHECK PROBABILITY ROW TOTALS
+// ============================================================
+
+var probabilityRowTotals =
+  transitionProbabilityMatrix.map(
+
+    function(row) {
+
+      return ee.Number(
+        ee.List(row).reduce(
+          ee.Reducer.sum()
+        )
+      );
+
+    }
+
+  );
+
+
+print(
+  "PROBABILITY ROW TOTALS",
+  probabilityRowTotals
+);
+
+
+// ============================================================
+// 12. CREATE 3 x 3 NEIGHBORHOOD KERNEL
 // ============================================================
 
 var kernel = ee.Kernel.square({
+
   radius: 1,
+
   units: "pixels",
+
   normalize: true
+
 });
 
+
+// ============================================================
+// 13. NEIGHBORHOOD FRACTIONS FROM 2018
+// ============================================================
 
 var neighborhood0 = lulc2018
   .eq(0)
   .reduceNeighborhood({
+
     reducer: ee.Reducer.mean(),
+
     kernel: kernel
+
   });
+
 
 var neighborhood1 = lulc2018
   .eq(1)
   .reduceNeighborhood({
+
     reducer: ee.Reducer.mean(),
+
     kernel: kernel
+
   });
+
 
 var neighborhood2 = lulc2018
   .eq(2)
   .reduceNeighborhood({
+
     reducer: ee.Reducer.mean(),
+
     kernel: kernel
+
   });
+
 
 var neighborhood3 = lulc2018
   .eq(3)
   .reduceNeighborhood({
+
     reducer: ee.Reducer.mean(),
+
     kernel: kernel
+
   });
+
 
 var neighborhood4 = lulc2018
   .eq(4)
   .reduceNeighborhood({
+
     reducer: ee.Reducer.mean(),
+
     kernel: kernel
+
   });
+
 
 var neighborhood5 = lulc2018
   .eq(5)
   .reduceNeighborhood({
+
     reducer: ee.Reducer.mean(),
+
     kernel: kernel
+
   });
 
 
 // ============================================================
-// 9. CREATE TRANSITION-PROBABILITY IMAGES
-// ============================================================
-//
-// For each destination class, create an image containing:
-//
-// P(current class -> destination class)
-//
+// 14. CREATE TRANSITION PROBABILITY IMAGE
 // ============================================================
 
 function probabilityImage(toClass) {
 
   var image = ee.Image(0);
 
-  for (var fromClass = 0; fromClass < 6; fromClass++) {
+  for (
+    var fromClass = 0;
+    fromClass < 6;
+    fromClass++
+  ) {
 
-    var probability = ee.Number(
+    var row =
       ee.List(
-        ee.List(
-          transitionProbabilityMatrix
-        ).get(fromClass)
-      ).get(toClass)
-    );
+        transitionProbabilityMatrix
+      ).get(fromClass);
+
+    var probability =
+      ee.Number(
+        ee.List(row).get(toClass)
+      );
 
     image = image.where(
+
       lulc2018.eq(fromClass),
+
       probability
+
     );
 
   }
@@ -307,175 +440,213 @@ function probabilityImage(toClass) {
 }
 
 
+// ============================================================
+// 15. PROBABILITY IMAGES FOR EACH DESTINATION CLASS
+// ============================================================
+
 var probTo0 = probabilityImage(0);
+
 var probTo1 = probabilityImage(1);
+
 var probTo2 = probabilityImage(2);
+
 var probTo3 = probabilityImage(3);
+
 var probTo4 = probabilityImage(4);
+
 var probTo5 = probabilityImage(5);
 
 
 // ============================================================
-// 10. CALCULATE CA SUITABILITY
+// 16. CA SUITABILITY
 // ============================================================
 //
 // Suitability =
 // transition probability × neighborhood fraction
 //
-// Higher value = greater spatial suitability
 // ============================================================
 
 var suitability0 =
-  probTo0.multiply(neighborhood0);
+  probTo0.multiply(
+    neighborhood0
+  );
 
 var suitability1 =
-  probTo1.multiply(neighborhood1);
+  probTo1.multiply(
+    neighborhood1
+  );
 
 var suitability2 =
-  probTo2.multiply(neighborhood2);
+  probTo2.multiply(
+    neighborhood2
+  );
 
 var suitability3 =
-  probTo3.multiply(neighborhood3);
+  probTo3.multiply(
+    neighborhood3
+  );
 
 var suitability4 =
-  probTo4.multiply(neighborhood4);
+  probTo4.multiply(
+    neighborhood4
+  );
 
 var suitability5 =
-  probTo5.multiply(neighborhood5);
+  probTo5.multiply(
+    neighborhood5
+  );
 
 
 // ============================================================
-// 11. COMBINE SIX SUITABILITY LAYERS
+// 17. CREATE SUITABILITY STACK
 // ============================================================
 
 var suitabilityStack =
   suitability0
     .rename("class0")
+
     .addBands(
       suitability1.rename("class1")
     )
+
     .addBands(
       suitability2.rename("class2")
     )
+
     .addBands(
       suitability3.rename("class3")
     )
+
     .addBands(
       suitability4.rename("class4")
     )
+
     .addBands(
       suitability5.rename("class5")
     );
 
 
 // ============================================================
-// 12. SELECT HIGHEST-SUITABILITY CLASS
+// 18. PREDICT 2020 LULC
 // ============================================================
 //
-// arrayArgmax returns the band index with the highest
-// suitability.
-//
-// 0 -> Water
-// 1 -> Forest
-// 2 -> Agriculture
-// 3 -> Built-up
-// 4 -> Barren
-// 5 -> Grassland/Wasteland
+// Select the class with the highest suitability.
 // ============================================================
 
-var predicted2020 = suitabilityStack
-  .toArray()
-  .arrayArgmax()
-  .arrayGet([0])
-  .rename("predicted2020")
-  .clip(basin);
+var predicted2020 =
+  suitabilityStack
+    .toArray()
+    .arrayArgmax()
+    .arrayGet([0])
+    .rename("predicted2020")
+    .clip(basin);
 
 
 // ============================================================
-// 13. DISPLAY PREDICTED 2020
+// 19. DISPLAY MAPS
 // ============================================================
-
-var palette = [
-  "419BDF",
-  "397D49",
-  "E49635",
-  "C4281B",
-  "A59B8F",
-  "88B053"
-];
 
 Map.addLayer(
+
   lulc2018,
+
   {
     min: 0,
     max: 5,
     palette: palette
   },
-  "Base LULC 2018"
+
+  "BASE LULC 2018"
+
 );
 
+
 Map.addLayer(
+
   predicted2020,
+
   {
     min: 0,
     max: 5,
     palette: palette
   },
+
   "PREDICTED LULC 2020"
+
 );
 
+
 Map.addLayer(
+
   actual2020,
+
   {
     min: 0,
     max: 5,
     palette: palette
   },
+
   "ACTUAL LULC 2020"
+
 );
 
 
 // ============================================================
-// 14. CHANGE MAP
+// 20. CREATE CHANGE MAPS
 // ============================================================
 
 var actualChange = lulc2018
-  .neq(actual2020);
+  .neq(actual2020)
+  .rename("actual_change");
+
 
 var predictedChange = lulc2018
-  .neq(predicted2020);
+  .neq(predicted2020)
+  .rename("predicted_change");
+
+
+// Correctly predicted change:
+//
+// Pixel changed in reality
+// AND
+// Pixel changed in prediction
+// AND
+// Predicted class equals actual class
 
 var correctlyPredictedChange =
   predicted2020
     .eq(actual2020)
     .and(actualChange)
-    .and(predictedChange);
+    .and(predictedChange)
+    .rename("correct_change");
 
 
 // ============================================================
-// 15. CONFUSION MATRIX
+// 21. VALIDATION SAMPLE
 // ============================================================
 
-var validationImage = predicted2020
-  .rename("predicted")
-  .addBands(
-    actual2020.rename("reference")
-  );
+var validationImage =
+  predicted2020
+    .rename("predicted")
+    .addBands(
+      actual2020.rename("reference")
+    );
 
 
-var samples = validationImage.sample({
+var samples =
+  validationImage.sample({
 
-  region: basin.geometry(),
+    region: basin.geometry(),
 
-  scale: 100,
+    scale: 100,
 
-  numPixels: 10000,
+    numPixels: 10000,
 
-  seed: 42,
+    seed: 42,
 
-  geometries: false
+    geometries: false
 
-});
+  });
 
 
 print(
@@ -484,10 +655,17 @@ print(
 );
 
 
+// ============================================================
+// 22. CONFUSION MATRIX
+// ============================================================
+
 var confusionMatrix =
   samples.errorMatrix(
+
     "reference",
+
     "predicted"
+
   );
 
 
@@ -498,7 +676,7 @@ print(
 
 
 // ============================================================
-// 16. OVERALL ACCURACY
+// 23. OVERALL ACCURACY
 // ============================================================
 
 print(
@@ -508,7 +686,7 @@ print(
 
 
 // ============================================================
-// 17. KAPPA
+// 24. KAPPA
 // ============================================================
 
 print(
@@ -518,7 +696,7 @@ print(
 
 
 // ============================================================
-// 18. PRODUCER ACCURACY
+// 25. PRODUCER ACCURACY
 // ============================================================
 
 print(
@@ -528,7 +706,7 @@ print(
 
 
 // ============================================================
-// 19. USER ACCURACY
+// 26. USER ACCURACY
 // ============================================================
 
 print(
@@ -538,16 +716,10 @@ print(
 
 
 // ============================================================
-// 20. FIGURE OF MERIT
-// ============================================================
-//
-// FOM = correctly predicted change pixels
-//       ---------------------------------
-//       total union of observed + predicted change
-//
+// 27. FIGURE OF MERIT - CORRECT CHANGE PIXELS
 // ============================================================
 
-var intersection =
+var intersectionResult =
   correctlyPredictedChange
   .reduceRegion({
 
@@ -566,41 +738,70 @@ var intersection =
   });
 
 
+print(
+  "CORRECTLY PREDICTED CHANGE PIXELS",
+  intersectionResult
+);
+
+
+// ============================================================
+// 28. FIGURE OF MERIT - UNION OF CHANGES
+// ============================================================
+
 var unionChange =
   actualChange
     .or(predictedChange)
-    .reduceRegion({
+    .rename("union_change");
 
-      reducer: ee.Reducer.sum(),
 
-      geometry: basin.geometry(),
+var unionResult =
+  unionChange
+  .reduceRegion({
 
-      scale: 100,
+    reducer: ee.Reducer.sum(),
 
-      bestEffort: true,
+    geometry: basin.geometry(),
 
-      maxPixels: 1e13,
+    scale: 100,
 
-      tileScale: 4
+    bestEffort: true,
 
-    });
+    maxPixels: 1e13,
 
+    tileScale: 4
+
+  });
+
+
+print(
+  "TOTAL CHANGE UNION PIXELS",
+  unionResult
+);
+
+
+// ============================================================
+// 29. EXTRACT FOM VALUES
+// ============================================================
 
 var intersectionValue =
   ee.Number(
-    intersection.get(
-      "predicted2020"
+    intersectionResult.get(
+      "correct_change"
     )
   );
 
 
 var unionValue =
   ee.Number(
-    unionChange.get(
-      "predicted2020"
+    unionResult.get(
+      "union_change"
     )
   );
 
+
+// ============================================================
+// 30. CALCULATE FIGURE OF MERIT
+// ============================================================
 
 var figureOfMerit =
   ee.Algorithms.If(
@@ -622,67 +823,83 @@ print(
 
 
 // ============================================================
-// 21. CHANGE AREAS
+// 31. ACTUAL CHANGE AREA
 // ============================================================
 
 var actualChangeArea =
   actualChange
-  .multiply(
-    ee.Image.pixelArea()
-  )
-  .divide(10000);
+    .multiply(
+      ee.Image.pixelArea()
+    )
+    .divide(10000)
+    .rename("actual_change_area");
 
 
-var predictedChangeArea =
-  predictedChange
-  .multiply(
-    ee.Image.pixelArea()
-  )
-  .divide(10000);
+var actualChangeAreaResult =
+  actualChangeArea
+  .reduceRegion({
+
+    reducer: ee.Reducer.sum(),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
 
 
 print(
   "ACTUAL CHANGE AREA 2018-2020 (ha)",
-  actualChangeArea.reduceRegion({
-
-    reducer: ee.Reducer.sum(),
-
-    geometry: basin.geometry(),
-
-    scale: 100,
-
-    bestEffort: true,
-
-    maxPixels: 1e13,
-
-    tileScale: 4
-
-  })
-);
-
-
-print(
-  "PREDICTED CHANGE AREA 2018-2020 (ha)",
-  predictedChangeArea.reduceRegion({
-
-    reducer: ee.Reducer.sum(),
-
-    geometry: basin.geometry(),
-
-    scale: 100,
-
-    bestEffort: true,
-
-    maxPixels: 1e13,
-
-    tileScale: 4
-
-  })
+  actualChangeAreaResult
 );
 
 
 // ============================================================
-// 22. CLASS INFORMATION
+// 32. PREDICTED CHANGE AREA
+// ============================================================
+
+var predictedChangeArea =
+  predictedChange
+    .multiply(
+      ee.Image.pixelArea()
+    )
+    .divide(10000)
+    .rename("predicted_change_area");
+
+
+var predictedChangeAreaResult =
+  predictedChangeArea
+  .reduceRegion({
+
+    reducer: ee.Reducer.sum(),
+
+    geometry: basin.geometry(),
+
+    scale: 100,
+
+    bestEffort: true,
+
+    maxPixels: 1e13,
+
+    tileScale: 4
+
+  });
+
+
+print(
+  "PREDICTED CHANGE AREA 2018-2020 (ha)",
+  predictedChangeAreaResult
+);
+
+
+// ============================================================
+// 33. CLASS INFORMATION
 // ============================================================
 
 print(
