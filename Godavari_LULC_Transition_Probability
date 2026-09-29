@@ -1,0 +1,403 @@
+// ============================================================
+// GODAVARI BASIN - DRIVING FACTORS
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. LOAD GODAVARI BASIN
+// ------------------------------------------------------------
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+
+// ============================================================
+// 2. ELEVATION - SRTM
+// ============================================================
+
+var dem = ee.Image("USGS/SRTMGL1_003")
+  .select("elevation")
+  .clip(basin);
+
+Map.addLayer(
+  dem,
+  {
+    min: 0,
+    max: 1500,
+    palette: [
+      'blue',
+      'green',
+      'yellow',
+      'orange',
+      'red'
+    ]
+  },
+  'Elevation'
+);
+
+
+// ============================================================
+// 3. SLOPE
+// ============================================================
+
+var slope = ee.Terrain.slope(dem)
+  .rename('slope');
+
+Map.addLayer(
+  slope,
+  {
+    min: 0,
+    max: 45,
+    palette: [
+      'green',
+      'yellow',
+      'orange',
+      'red'
+    ]
+  },
+  'Slope'
+);
+
+
+// ============================================================
+// 4. POPULATION - WORLDPOP 2020
+// ============================================================
+
+var population = ee.ImageCollection(
+  "WorldPop/GP/100m/pop"
+)
+.filterDate(
+  '2020-01-01',
+  '2021-01-01'
+)
+.filterBounds(basin)
+.mosaic()
+.select('population')
+.clip(basin);
+
+Map.addLayer(
+  population,
+  {
+    min: 0,
+    max: 1000,
+    palette: [
+      'white',
+      'yellow',
+      'orange',
+      'red',
+      'darkred'
+    ]
+  },
+  'Population 2020'
+);
+
+
+// ============================================================
+// 5. RIVERS - HYDROSHEDS
+// ============================================================
+
+var rivers = ee.FeatureCollection(
+  "WWF/HydroSHEDS/v1/FreeFlowingRivers"
+)
+.filterBounds(basin);
+
+
+// Display rivers
+
+Map.addLayer(
+  rivers,
+  {
+    color: '0000FF'
+  },
+  'Rivers'
+);
+
+
+// Convert rivers to raster
+
+var riverRaster = ee.Image()
+  .byte()
+  .paint(
+    rivers,
+    1
+  )
+  .clip(basin);
+
+
+// ============================================================
+// 6. DISTANCE TO RIVERS
+// ============================================================
+
+// Maximum search distance = 50 km
+
+var distanceToRiver = riverRaster
+  .distance(
+    ee.Kernel.euclidean(
+      50000,
+      'meters'
+    )
+  )
+  .rename('distance_to_river')
+  .clip(basin);
+
+
+// Convert to kilometers
+
+var distanceToRiverKm = distanceToRiver
+  .divide(1000)
+  .rename('distance_to_river_km');
+
+
+Map.addLayer(
+  distanceToRiverKm,
+  {
+    min: 0,
+    max: 50,
+    palette: [
+      '0000FF',
+      '00FFFF',
+      'FFFF00',
+      'FF0000'
+    ]
+  },
+  'Distance to Rivers (km)'
+);
+
+
+// ============================================================
+// 7. SETTLEMENTS - GHSL 2018
+// ============================================================
+
+// GHSL built-up surface dataset
+// 2018, 10 m resolution
+
+var ghsl = ee.ImageCollection(
+  "JRC/GHSL/P2023A/GHS_BUILT_S_10m"
+)
+.filterDate(
+  '2018-01-01',
+  '2019-01-01'
+)
+.first()
+.clip(basin);
+
+
+// Built-up surface > 0 = settlement/built environment
+
+var settlements = ghsl
+  .select('built_surface')
+  .gt(0)
+  .selfMask();
+
+
+// Display settlements
+
+Map.addLayer(
+  settlements,
+  {
+    palette: ['FF00FF']
+  },
+  'GHSL Settlements'
+);
+
+
+// ============================================================
+// 8. DISTANCE TO SETTLEMENTS
+// ============================================================
+
+var distanceToSettlement = settlements
+  .distance(
+    ee.Kernel.euclidean(
+      50000,
+      'meters'
+    )
+  )
+  .rename('distance_to_settlement')
+  .clip(basin);
+
+
+var distanceToSettlementKm =
+  distanceToSettlement
+  .divide(1000)
+  .rename('distance_to_settlement_km');
+
+
+Map.addLayer(
+  distanceToSettlementKm,
+  {
+    min: 0,
+    max: 50,
+    palette: [
+      'FF0000',
+      'FFFF00',
+      '00FFFF',
+      '0000FF'
+    ]
+  },
+  'Distance to Settlements (km)'
+);
+
+
+// ============================================================
+// 9. OUR EXISTING BUILT-UP - 2020 LULC
+// ============================================================
+
+var dw2020 = ee.ImageCollection(
+  "GOOGLE/DYNAMICWORLD/V1"
+)
+.filterDate(
+  '2020-01-01',
+  '2021-01-01'
+)
+.filterBounds(basin)
+.select('label')
+.mode();
+
+
+// Dynamic World built-up = class 6
+
+var builtUp2020 = dw2020
+  .eq(6)
+  .selfMask()
+  .clip(basin);
+
+
+Map.addLayer(
+  builtUp2020,
+  {
+    palette: ['FF0000']
+  },
+  'Existing Built-up 2020'
+);
+
+
+// ============================================================
+// 10. DISTANCE TO EXISTING BUILT-UP
+// ============================================================
+
+var distanceToBuiltUp = builtUp2020
+  .distance(
+    ee.Kernel.euclidean(
+      50000,
+      'meters'
+    )
+  )
+  .rename('distance_to_builtup')
+  .clip(basin);
+
+
+var distanceToBuiltUpKm =
+  distanceToBuiltUp
+  .divide(1000)
+  .rename('distance_to_builtup_km');
+
+
+Map.addLayer(
+  distanceToBuiltUpKm,
+  {
+    min: 0,
+    max: 50,
+    palette: [
+      'FF0000',
+      'FFFF00',
+      '00FFFF',
+      '0000FF'
+    ]
+  },
+  'Distance to Existing Built-up (km)'
+);
+
+
+// ============================================================
+// 11. PRINT BASIC INFORMATION
+// ============================================================
+
+print('========================================');
+print('GODAVARI BASIN DRIVING FACTORS');
+print('========================================');
+
+print('Elevation:', dem);
+print('Slope:', slope);
+print('Population 2020:', population);
+print(
+  'Number of river features:',
+  rivers.size()
+);
+print('Distance to Rivers:', distanceToRiverKm);
+print('GHSL Settlements:', settlements);
+print(
+  'Distance to Settlements:',
+  distanceToSettlementKm
+);
+print('Existing Built-up 2020:', builtUp2020);
+print(
+  'Distance to Built-up:',
+  distanceToBuiltUpKm
+);
+
+print('========================================');
+
+
+// ============================================================
+// 12. CREATE MULTI-BAND FACTOR IMAGE
+// ============================================================
+
+var factors = dem
+  .rename('elevation')
+  .addBands(
+    slope.rename('slope')
+  )
+  .addBands(
+    population.rename('population')
+  )
+  .addBands(
+    distanceToRiverKm
+  )
+  .addBands(
+    distanceToSettlementKm
+  )
+  .addBands(
+    distanceToBuiltUpKm
+  )
+  .clip(basin);
+
+
+print(
+  'MULTI-BAND DRIVING FACTORS',
+  factors
+);
+
+
+// ============================================================
+// 13. EXPORT DRIVING FACTORS
+// ============================================================
+
+Export.image.toDrive({
+
+  image: factors,
+
+  description:
+    'Godavari_Driving_Factors',
+
+  folder:
+    'Godavari_LULC',
+
+  fileNamePrefix:
+    'Godavari_Driving_Factors',
+
+  region:
+    basin.geometry(),
+
+  scale: 100,
+
+  maxPixels: 1e13
+
+});
+
+
+// ============================================================
+// END
+// ============================================================
