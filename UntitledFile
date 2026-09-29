@@ -1,0 +1,20 @@
+// ==========================================
+// EXPORT GODAVARI BASIN FOR OSM ROAD EXTRACTION
+// ==========================================
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+// Convert basin to a single feature
+var basinFeature = ee.Feature(basin.geometry());
+
+Map.centerObject(basin, 6);
+Map.addLayer(basin, {}, "Godavari Basin");
+
+// Export as GeoJSON
+Export.table.toDrive({
+  collection: ee.FeatureCollection([basinFeature]),
+  description: "Godavari_Basin_GeoJSON",
+  fileFormat: "GeoJSON"
+});
