@@ -1,0 +1,506 @@
+// ============================================================
+// GODAVARI BASIN - CA HINDCAST PREPARATION
+// Historical transition: 2016 -> 2018
+// Purpose: Prepare CA-Markov inputs for predicting 2020
+// ============================================================
+
+
+// ------------------------------------------------------------
+// 1. LOAD GODAVARI BASIN
+// ------------------------------------------------------------
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+
+// ------------------------------------------------------------
+// 2. FUNCTION TO CREATE 6-CLASS LULC
+// ------------------------------------------------------------
+
+function getLULC(startDate, endDate) {
+
+  var dw = ee.ImageCollection(
+    "GOOGLE/DYNAMICWORLD/V1"
+  )
+  .filterDate(startDate, endDate)
+  .filterBounds(basin)
+  .select("label");
+
+  var mode = dw.mode();
+
+  return mode.remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  ).clip(basin);
+}
+
+
+// ------------------------------------------------------------
+// 3. CREATE HISTORICAL LULC MAPS
+// ------------------------------------------------------------
+
+var lulc2016 = getLULC(
+  '2016-01-01',
+  '2017-01-01'
+);
+
+var lulc2018 = getLULC(
+  '2018-01-01',
+  '2019-01-01'
+);
+
+var lulc2020 = getLULC(
+  '2020-01-01',
+  '2021-01-01'
+);
+
+
+// ------------------------------------------------------------
+// 4. DISPLAY 2016 / 2018 / 2020
+// ------------------------------------------------------------
+
+var palette = [
+  '419BDF',  // 0 Water
+  '397D49',  // 1 Forest
+  'E49635',  // 2 Agriculture
+  'C4281B',  // 3 Built-up
+  'A59B8F',  // 4 Barren
+  '88B053'   // 5 Grassland/Wasteland
+];
+
+Map.addLayer(
+  lulc2016,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'LULC 2016'
+);
+
+Map.addLayer(
+  lulc2018,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'LULC 2018'
+);
+
+Map.addLayer(
+  lulc2020,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'Actual LULC 2020'
+);
+
+
+// ============================================================
+// 5. 2016 -> 2018 TRANSITION IMAGE
+// ============================================================
+
+var transition2016_2018 = lulc2016
+  .multiply(10)
+  .add(lulc2018)
+  .rename('transition');
+
+
+// ------------------------------------------------------------
+// 6. TRANSITION AREAS
+// ------------------------------------------------------------
+
+var transitionArea = ee.Image.pixelArea()
+  .divide(10000)
+  .addBands(transition2016_2018);
+
+var transitionResult = transitionArea.reduceRegion({
+
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'transition'
+  }),
+
+  geometry: basin.geometry(),
+
+  scale: 100,
+
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
+
+});
+
+print(
+  '2016 -> 2018 TRANSITION AREAS (ha)',
+  transitionResult
+);
+
+
+// ============================================================
+// 7. TRANSITION DICTIONARY
+// ============================================================
+
+var groups = ee.List(
+  transitionResult.get('groups')
+);
+
+var transitionDictionary = ee.Dictionary(
+  groups.iterate(
+
+    function(item, dictionary) {
+
+      item = ee.Dictionary(item);
+
+      dictionary = ee.Dictionary(dictionary);
+
+      var code = ee.Number(
+        item.get('transition')
+      )
+      .toInt()
+      .format('%d');
+
+      var area = ee.Number(
+        item.get('sum')
+      );
+
+      return dictionary.set(
+        code,
+        area
+      );
+
+    },
+
+    ee.Dictionary({})
+  )
+);
+
+print(
+  '2016 -> 2018 TRANSITION DICTIONARY',
+  transitionDictionary
+);
+
+
+// ============================================================
+// 8. TRANSITION AREA MATRIX
+// ============================================================
+
+function getTransitionArea(
+  fromClass,
+  toClass
+) {
+
+  var code = ee.Number(fromClass)
+    .multiply(10)
+    .add(ee.Number(toClass))
+    .toInt()
+    .format('%d');
+
+  return ee.Number(
+    transitionDictionary.get(
+      code,
+      0
+    )
+  );
+}
+
+
+var transitionAreaMatrix = ee.List.sequence(0, 5)
+  .map(
+
+    function(fromClass) {
+
+      return ee.List.sequence(0, 5)
+        .map(
+
+          function(toClass) {
+
+            return getTransitionArea(
+              fromClass,
+              toClass
+            );
+
+          }
+
+        );
+
+    }
+
+  );
+
+
+print(
+  '2016 -> 2018 TRANSITION AREA MATRIX (ha)',
+  transitionAreaMatrix
+);
+
+
+// ============================================================
+// 9. TRANSITION PROBABILITY MATRIX
+// ============================================================
+
+var transitionProbabilityMatrix =
+  transitionAreaMatrix.map(
+
+    function(row) {
+
+      row = ee.List(row);
+
+      var total = ee.Number(
+        row.reduce(
+          ee.Reducer.sum()
+        )
+      );
+
+      return row.map(
+
+        function(value) {
+
+          value = ee.Number(value);
+
+          return ee.Algorithms.If(
+            total.gt(0),
+            value.divide(total),
+            0
+          );
+
+        }
+
+      );
+
+    }
+
+  );
+
+
+print(
+  '2016 -> 2018 TRANSITION PROBABILITY MATRIX',
+  transitionProbabilityMatrix
+);
+
+
+// ------------------------------------------------------------
+// 10. CHECK ROW TOTALS
+// ------------------------------------------------------------
+
+var probabilityRowTotals =
+  transitionProbabilityMatrix.map(
+
+    function(row) {
+
+      return ee.Number(
+        ee.List(row).reduce(
+          ee.Reducer.sum()
+        )
+      );
+
+    }
+
+  );
+
+
+print(
+  'PROBABILITY ROW TOTALS',
+  probabilityRowTotals
+);
+
+
+// ============================================================
+// 11. NEIGHBORHOOD FRACTIONS
+// ============================================================
+
+// CA uses the surrounding cells to determine
+// spatial suitability.
+//
+// 3 x 3 neighborhood:
+//
+// [x x x]
+// [x x x]
+// [x x x]
+
+var neighborhoodKernel =
+  ee.Kernel.square({
+    radius: 1,
+    units: 'pixels',
+    normalize: true
+  });
+
+
+// ------------------------------------------------------------
+// 12. CALCULATE NEIGHBORHOOD FRACTION
+// FOR EACH LULC CLASS
+// ------------------------------------------------------------
+
+var neighborhood0 = lulc2018
+  .eq(0)
+  .reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: neighborhoodKernel
+  })
+  .rename('water_neighbor');
+
+var neighborhood1 = lulc2018
+  .eq(1)
+  .reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: neighborhoodKernel
+  })
+  .rename('forest_neighbor');
+
+var neighborhood2 = lulc2018
+  .eq(2)
+  .reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: neighborhoodKernel
+  })
+  .rename('agriculture_neighbor');
+
+var neighborhood3 = lulc2018
+  .eq(3)
+  .reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: neighborhoodKernel
+  })
+  .rename('builtup_neighbor');
+
+var neighborhood4 = lulc2018
+  .eq(4)
+  .reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: neighborhoodKernel
+  })
+  .rename('barren_neighbor');
+
+var neighborhood5 = lulc2018
+  .eq(5)
+  .reduceNeighborhood({
+    reducer: ee.Reducer.mean(),
+    kernel: neighborhoodKernel
+  })
+  .rename('grassland_neighbor');
+
+
+// ------------------------------------------------------------
+// 13. DISPLAY AGRICULTURE NEIGHBORHOOD
+// ------------------------------------------------------------
+
+Map.addLayer(
+  neighborhood2,
+  {
+    min: 0,
+    max: 1,
+    palette: [
+      'FFFFFF',
+      'E49635'
+    ]
+  },
+  'Agriculture Neighborhood Suitability'
+);
+
+
+// ============================================================
+// 14. PRINT NEIGHBORHOOD FACTORS
+// ============================================================
+
+print(
+  'Water Neighborhood Fraction',
+  neighborhood0
+);
+
+print(
+  'Forest Neighborhood Fraction',
+  neighborhood1
+);
+
+print(
+  'Agriculture Neighborhood Fraction',
+  neighborhood2
+);
+
+print(
+  'Built-up Neighborhood Fraction',
+  neighborhood3
+);
+
+print(
+  'Barren Neighborhood Fraction',
+  neighborhood4
+);
+
+print(
+  'Grassland Neighborhood Fraction',
+  neighborhood5
+);
+
+
+// ============================================================
+// 15. CREATE NEIGHBORHOOD MULTI-BAND IMAGE
+// ============================================================
+
+var neighborhoodFactors =
+  neighborhood0
+    .addBands(neighborhood1)
+    .addBands(neighborhood2)
+    .addBands(neighborhood3)
+    .addBands(neighborhood4)
+    .addBands(neighborhood5);
+
+
+// ============================================================
+// 16. PRINT INFORMATION
+// ============================================================
+
+print(
+  'NEIGHBORHOOD FACTORS',
+  neighborhoodFactors
+);
+
+
+// ============================================================
+// 17. CLASS INFORMATION
+// ============================================================
+
+print(
+  '=========================================='
+);
+
+print(
+  'CLASS 0 = WATER'
+);
+
+print(
+  'CLASS 1 = FOREST'
+);
+
+print(
+  'CLASS 2 = AGRICULTURE'
+);
+
+print(
+  'CLASS 3 = BUILT-UP'
+);
+
+print(
+  'CLASS 4 = BARREN'
+);
+
+print(
+  'CLASS 5 = GRASSLAND/WASTELAND'
+);
+
+print(
+  '=========================================='
+);
+
+
+// ============================================================
+// END OF STAGE 1
+// ============================================================
