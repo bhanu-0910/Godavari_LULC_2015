@@ -1,10 +1,11 @@
 // ============================================================
-// GODAVARI BASIN - DRIVING FACTORS
+// GODAVARI BASIN - LULC TRANSITION PROBABILITY
+// Base period: 2016 -> 2020
 // ============================================================
 
 
 // ------------------------------------------------------------
-// 1. LOAD GODAVARI BASIN
+// 1. LOAD BASIN
 // ------------------------------------------------------------
 
 var basin = ee.FeatureCollection(
@@ -14,390 +15,233 @@ var basin = ee.FeatureCollection(
 Map.centerObject(basin, 7);
 
 
-// ============================================================
-// 2. ELEVATION - SRTM
-// ============================================================
+// ------------------------------------------------------------
+// 2. FUNCTION TO CREATE 6-CLASS LULC
+// ------------------------------------------------------------
 
-var dem = ee.Image("USGS/SRTMGL1_003")
-  .select("elevation")
-  .clip(basin);
+function getLULC(startDate, endDate) {
 
-Map.addLayer(
-  dem,
-  {
-    min: 0,
-    max: 1500,
-    palette: [
-      'blue',
-      'green',
-      'yellow',
-      'orange',
-      'red'
-    ]
-  },
-  'Elevation'
+  var dw = ee.ImageCollection(
+    "GOOGLE/DYNAMICWORLD/V1"
+  )
+  .filterDate(startDate, endDate)
+  .filterBounds(basin)
+  .select("label");
+
+  var mode = dw.mode();
+
+  return mode.remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  ).clip(basin);
+}
+
+
+// ------------------------------------------------------------
+// 3. CREATE 2016 AND 2020 LULC
+// ------------------------------------------------------------
+
+var lulc2016 = getLULC(
+  '2016-01-01',
+  '2017-01-01'
 );
 
-
-// ============================================================
-// 3. SLOPE
-// ============================================================
-
-var slope = ee.Terrain.slope(dem)
-  .rename('slope');
-
-Map.addLayer(
-  slope,
-  {
-    min: 0,
-    max: 45,
-    palette: [
-      'green',
-      'yellow',
-      'orange',
-      'red'
-    ]
-  },
-  'Slope'
-);
-
-
-// ============================================================
-// 4. POPULATION - WORLDPOP 2020
-// ============================================================
-
-var population = ee.ImageCollection(
-  "WorldPop/GP/100m/pop"
-)
-.filterDate(
+var lulc2020 = getLULC(
   '2020-01-01',
   '2021-01-01'
-)
-.filterBounds(basin)
-.mosaic()
-.select('population')
-.clip(basin);
-
-Map.addLayer(
-  population,
-  {
-    min: 0,
-    max: 1000,
-    palette: [
-      'white',
-      'yellow',
-      'orange',
-      'red',
-      'darkred'
-    ]
-  },
-  'Population 2020'
 );
 
 
-// ============================================================
-// 5. RIVERS - HYDROSHEDS
-// ============================================================
+// ------------------------------------------------------------
+// 4. CREATE TRANSITION CODE
+// ------------------------------------------------------------
 
-var rivers = ee.FeatureCollection(
-  "WWF/HydroSHEDS/v1/FreeFlowingRivers"
-)
-.filterBounds(basin);
+// Example:
+// 0 -> 0 = 0
+// 1 -> 2 = 12
+// 5 -> 3 = 53
 
+var transition = lulc2016
+  .multiply(10)
+  .add(lulc2020);
 
-// Display rivers
 
-Map.addLayer(
-  rivers,
-  {
-    color: '0000FF'
-  },
-  'Rivers'
-);
+// ------------------------------------------------------------
+// 5. CALCULATE TRANSITION AREAS
+// ------------------------------------------------------------
 
+var transitionArea = ee.Image.pixelArea()
+  .divide(10000)
+  .addBands(transition);
 
-// Convert rivers to raster
+var transitionResult = transitionArea.reduceRegion({
 
-var riverRaster = ee.Image()
-  .byte()
-  .paint(
-    rivers,
-    1
-  )
-  .clip(basin);
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'transition'
+  }),
 
-
-// ============================================================
-// 6. DISTANCE TO RIVERS
-// ============================================================
-
-// Maximum search distance = 50 km
-
-var distanceToRiver = riverRaster
-  .distance(
-    ee.Kernel.euclidean(
-      50000,
-      'meters'
-    )
-  )
-  .rename('distance_to_river')
-  .clip(basin);
-
-
-// Convert to kilometers
-
-var distanceToRiverKm = distanceToRiver
-  .divide(1000)
-  .rename('distance_to_river_km');
-
-
-Map.addLayer(
-  distanceToRiverKm,
-  {
-    min: 0,
-    max: 50,
-    palette: [
-      '0000FF',
-      '00FFFF',
-      'FFFF00',
-      'FF0000'
-    ]
-  },
-  'Distance to Rivers (km)'
-);
-
-
-// ============================================================
-// 7. SETTLEMENTS - GHSL 2018
-// ============================================================
-
-// GHSL built-up surface dataset
-// 2018, 10 m resolution
-
-var ghsl = ee.ImageCollection(
-  "JRC/GHSL/P2023A/GHS_BUILT_S_10m"
-)
-.filterDate(
-  '2018-01-01',
-  '2019-01-01'
-)
-.first()
-.clip(basin);
-
-
-// Built-up surface > 0 = settlement/built environment
-
-var settlements = ghsl
-  .select('built_surface')
-  .gt(0)
-  .selfMask();
-
-
-// Display settlements
-
-Map.addLayer(
-  settlements,
-  {
-    palette: ['FF00FF']
-  },
-  'GHSL Settlements'
-);
-
-
-// ============================================================
-// 8. DISTANCE TO SETTLEMENTS
-// ============================================================
-
-var distanceToSettlement = settlements
-  .distance(
-    ee.Kernel.euclidean(
-      50000,
-      'meters'
-    )
-  )
-  .rename('distance_to_settlement')
-  .clip(basin);
-
-
-var distanceToSettlementKm =
-  distanceToSettlement
-  .divide(1000)
-  .rename('distance_to_settlement_km');
-
-
-Map.addLayer(
-  distanceToSettlementKm,
-  {
-    min: 0,
-    max: 50,
-    palette: [
-      'FF0000',
-      'FFFF00',
-      '00FFFF',
-      '0000FF'
-    ]
-  },
-  'Distance to Settlements (km)'
-);
-
-
-// ============================================================
-// 9. OUR EXISTING BUILT-UP - 2020 LULC
-// ============================================================
-
-var dw2020 = ee.ImageCollection(
-  "GOOGLE/DYNAMICWORLD/V1"
-)
-.filterDate(
-  '2020-01-01',
-  '2021-01-01'
-)
-.filterBounds(basin)
-.select('label')
-.mode();
-
-
-// Dynamic World built-up = class 6
-
-var builtUp2020 = dw2020
-  .eq(6)
-  .selfMask()
-  .clip(basin);
-
-
-Map.addLayer(
-  builtUp2020,
-  {
-    palette: ['FF0000']
-  },
-  'Existing Built-up 2020'
-);
-
-
-// ============================================================
-// 10. DISTANCE TO EXISTING BUILT-UP
-// ============================================================
-
-var distanceToBuiltUp = builtUp2020
-  .distance(
-    ee.Kernel.euclidean(
-      50000,
-      'meters'
-    )
-  )
-  .rename('distance_to_builtup')
-  .clip(basin);
-
-
-var distanceToBuiltUpKm =
-  distanceToBuiltUp
-  .divide(1000)
-  .rename('distance_to_builtup_km');
-
-
-Map.addLayer(
-  distanceToBuiltUpKm,
-  {
-    min: 0,
-    max: 50,
-    palette: [
-      'FF0000',
-      'FFFF00',
-      '00FFFF',
-      '0000FF'
-    ]
-  },
-  'Distance to Existing Built-up (km)'
-);
-
-
-// ============================================================
-// 11. PRINT BASIC INFORMATION
-// ============================================================
-
-print('========================================');
-print('GODAVARI BASIN DRIVING FACTORS');
-print('========================================');
-
-print('Elevation:', dem);
-print('Slope:', slope);
-print('Population 2020:', population);
-print(
-  'Number of river features:',
-  rivers.size()
-);
-print('Distance to Rivers:', distanceToRiverKm);
-print('GHSL Settlements:', settlements);
-print(
-  'Distance to Settlements:',
-  distanceToSettlementKm
-);
-print('Existing Built-up 2020:', builtUp2020);
-print(
-  'Distance to Built-up:',
-  distanceToBuiltUpKm
-);
-
-print('========================================');
-
-
-// ============================================================
-// 12. CREATE MULTI-BAND FACTOR IMAGE
-// ============================================================
-
-var factors = dem
-  .rename('elevation')
-  .addBands(
-    slope.rename('slope')
-  )
-  .addBands(
-    population.rename('population')
-  )
-  .addBands(
-    distanceToRiverKm
-  )
-  .addBands(
-    distanceToSettlementKm
-  )
-  .addBands(
-    distanceToBuiltUpKm
-  )
-  .clip(basin);
-
-
-print(
-  'MULTI-BAND DRIVING FACTORS',
-  factors
-);
-
-
-// ============================================================
-// 13. EXPORT DRIVING FACTORS
-// ============================================================
-
-Export.image.toDrive({
-
-  image: factors,
-
-  description:
-    'Godavari_Driving_Factors',
-
-  folder:
-    'Godavari_LULC',
-
-  fileNamePrefix:
-    'Godavari_Driving_Factors',
-
-  region:
-    basin.geometry(),
+  geometry: basin.geometry(),
 
   scale: 100,
 
-  maxPixels: 1e13
+  bestEffort: true,
+
+  maxPixels: 1e13,
+
+  tileScale: 4
 
 });
 
+print(
+  '2016 -> 2020 TRANSITION AREAS (ha)',
+  transitionResult
+);
 
-// ============================================================
-// END
-// ============================================================
+
+// ------------------------------------------------------------
+// 6. CREATE TRANSITION AREA MATRIX
+// ------------------------------------------------------------
+
+// Convert grouped result into a dictionary
+
+var groups = ee.List(
+  transitionResult.get('groups')
+);
+
+
+// Create a 6 x 6 matrix
+
+var transitionMatrix = ee.List.sequence(0, 5)
+  .map(function(fromClass) {
+
+    fromClass = ee.Number(fromClass);
+
+    return ee.List.sequence(0, 5)
+      .map(function(toClass) {
+
+        toClass = ee.Number(toClass);
+
+        var code = fromClass
+          .multiply(10)
+          .add(toClass);
+
+        var match = groups.filter(
+          ee.Filter.eq(
+            'transition',
+            code
+          )
+        );
+
+        var area = ee.Algorithms.If(
+          ee.List(match).size().gt(0),
+
+          ee.Dictionary(
+            ee.List(match).get(0)
+          ).get('sum'),
+
+          0
+        );
+
+        return ee.Number(area);
+
+      });
+
+  });
+
+
+print(
+  'TRANSITION AREA MATRIX (ha)',
+  transitionMatrix
+);
+
+
+// ------------------------------------------------------------
+// 7. CONVERT TRANSITION AREAS TO PROBABILITIES
+// ------------------------------------------------------------
+
+// Each row is divided by its row total.
+// Therefore every row should sum approximately to 1.
+
+// Example:
+//
+// Forest -> Water
+// Forest -> Forest
+// Forest -> Agriculture
+// etc.
+
+var probabilityMatrix = transitionMatrix.map(
+  function(row) {
+
+    row = ee.List(row);
+
+    var rowTotal = ee.Number(
+      row.reduce(ee.Reducer.sum())
+    );
+
+    return row.map(
+      function(value) {
+
+        value = ee.Number(value);
+
+        return ee.Algorithms.If(
+          rowTotal.gt(0),
+          value.divide(rowTotal),
+          0
+        );
+
+      }
+    );
+
+  }
+);
+
+
+// ------------------------------------------------------------
+// 8. PRINT PROBABILITY MATRIX
+// ------------------------------------------------------------
+
+print(
+  '2016 -> 2020 TRANSITION PROBABILITY MATRIX',
+  probabilityMatrix
+);
+
+
+// ------------------------------------------------------------
+// 9. CLASS INFORMATION
+// ------------------------------------------------------------
+
+print('==========================================');
+
+print('CLASS 0 = WATER');
+print('CLASS 1 = FOREST');
+print('CLASS 2 = AGRICULTURE');
+print('CLASS 3 = BUILT-UP');
+print('CLASS 4 = BARREN');
+print('CLASS 5 = GRASSLAND/WASTELAND');
+
+print('==========================================');
+
+
+// ------------------------------------------------------------
+// 10. VISUALIZE 2020 LULC
+// ------------------------------------------------------------
+
+var palette = [
+  '419BDF',
+  '397D49',
+  'E49635',
+  'C4281B',
+  'A59B8F',
+  '88B053'
+];
+
+Map.addLayer(
+  lulc2020,
+  {
+    min: 0,
+    max: 5,
+    palette: palette
+  },
+  'LULC 2020'
+);
