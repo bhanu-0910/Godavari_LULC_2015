@@ -279,3 +279,41 @@ Export.table.toDrive({
     ".geo"
   ]
 });
+
+/***** STEP 2: MAP DISAGREEMENT LOCATIONS *****/
+
+// Matching points: green
+var matchingPoints = results.filter(
+  ee.Filter.eq("Match", 1)
+);
+
+// Non-matching points: red
+var disagreementPoints = results.filter(
+  ee.Filter.eq("Match", 0)
+);
+
+Map.addLayer(
+  matchingPoints.style({
+    color: "00FF00",
+    pointSize: 4,
+    width: 1
+  }),
+  {},
+  "Matching points"
+);
+
+Map.addLayer(
+  disagreementPoints.style({
+    color: "FF0000",
+    pointSize: 5,
+    width: 1
+  }),
+  {},
+  "Disagreement points"
+);
+
+// Zoom out to the entire Godavari Basin
+Map.centerObject(basin, 6);
+
+print("Review these disagreement points:",
+      disagreementPoints.limit(20));
