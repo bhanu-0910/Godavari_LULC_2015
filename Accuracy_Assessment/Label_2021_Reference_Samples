@@ -103,9 +103,9 @@ Map.addLayer(
 );
 
 Map.addLayer(
-  selectedPoint,
-  {color: "blue"},
-  "Selected Sample Point"
+  selectedPoint.buffer(100),
+  {color: "yellow"},
+  "Selected Sample - 100m buffer"
 );
 
 
@@ -313,7 +313,7 @@ Map.addLayer(
 );
 
 // Zoom out to the entire Godavari Basin
-Map.centerObject(basin, 6);
+Map.centerObject(selectedPoint, 16);
 
 print("Review these disagreement points:",
       disagreementPoints.limit(20));
