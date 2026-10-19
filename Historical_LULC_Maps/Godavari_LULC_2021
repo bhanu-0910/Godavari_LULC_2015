@@ -151,3 +151,57 @@ Export.image.toDrive({
 // ============================================================
 // END
 // ============================================================
+
+/***************************************************************
+ STEP 9 — SAMPLE LULC AND BUILD PRELIMINARY CONFUSION MATRIX
+***************************************************************/
+
+var samples = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
+);
+
+// Extract predicted class from the 2021 map.
+var predicted = lulc2021.rename("predicted");
+
+var validation = predicted.sampleRegions({
+  collection: samples,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+// Rename the sample's LULC field to reference.
+// IMPORTANT: This is valid only if the sample labels are
+// independent, verified reference labels.
+validation = validation.map(function(feature) {
+  return feature.set("reference", feature.get("LULC"));
+});
+
+print("Validation sample count:", validation.size());
+print("Validation feature:", validation.first());
+print("Validation property names:", validation.first().propertyNames());
+
+// Count sample labels by class.
+var referenceCounts = validation.aggregate_histogram("reference");
+var predictedCounts = validation.aggregate_histogram("predicted");
+
+print("Reference label counts:", referenceCounts);
+print("Predicted class counts:", predictedCounts);
+
+// Confusion matrix: rows = reference, columns = predicted.
+var matrix = validation.errorMatrix(
+  "reference",
+  "predicted",
+  [0, 1, 2, 3, 4, 5]
+);
+
+print("Confusion matrix (PRELIMINARY):", matrix);
+print("Overall accuracy (PRELIMINARY):", matrix.accuracy());
+print("Producer's accuracy (PRELIMINARY):", matrix.producersAccuracy());
+print("User's accuracy (PRELIMINARY):", matrix.consumersAccuracy());
+print("Kappa (PRELIMINARY):", matrix.kappa());
+
+/***************************************************************
+ END STEP 9
+***************************************************************/
