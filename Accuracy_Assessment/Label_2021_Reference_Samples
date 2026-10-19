@@ -317,3 +317,8 @@ Map.centerObject(selectedPoint, 16);
 
 print("Review these disagreement points:",
       disagreementPoints.limit(20));
+print(
+  "Selected Sentinel-2 image date:",
+  ee.Date(ee.Image(s2.first()).get("system:time_start"))
+    .format("YYYY-MM-dd")
+);
