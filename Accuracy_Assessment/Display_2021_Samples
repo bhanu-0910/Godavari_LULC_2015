@@ -43,3 +43,17 @@ Map.addLayer(samples, {color: "yellow"}, "2021 Sample Points");
 print("Sample table:", samples);
 print("Sample count:", samples.size());
 print("2021 LULC map:", lulc2021);
+
+var referenceImage2021 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .filterBounds(basin)
+  .filterDate("2021-01-01", "2022-01-01")
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
+  .median()
+  .clip(basin);
+
+Map.addLayer(
+  referenceImage2021,
+  {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
+  "Sentinel-2 Reference Imagery 2021"
+);
+
