@@ -1,427 +1,136 @@
 
-/************************************************************
- GODAVARI BASIN - LULC 2021 CROSS-PRODUCT COMPARISON
+/***** AUTOMATED SEASONAL LULC SCREENING — ALL SAMPLES *****/
 
- Original classes:
- 0 = Water
- 1 = Forest
- 2 = Agriculture
- 3 = Built-up
- 4 = Barren
- 5 = Grassland/Wasteland
-
- IMPORTANT:
- ESA WorldCover comparison is NOT verified ground-truth
- accuracy. It measures agreement between two products.
-************************************************************/
-
-
-// ==========================================================
-// 1. LOAD BASIN AND EXISTING SAMPLE POINTS
-// ==========================================================
-
-var basin = ee.FeatureCollection(
-  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
-);
-
-var samples = ee.FeatureCollection(
-  "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
-);
-
-var classNames = ee.Dictionary({
-  0: "Water",
-  1: "Forest",
-  2: "Agriculture",
-  3: "Built-up",
-  4: "Barren",
-  5: "Grassland/Wasteland"
-});
-
-print("Total sample points:", samples.size());
-print("Original predicted class counts:",
-      samples.aggregate_histogram("LULC"));
-
-
-// ==========================================================
-// 2. INSPECT ONE SAMPLE USING SENTINEL-2
-// ==========================================================
-
-// Change the index from 0 to 1, 2, 3... to inspect another point.
-var sampleNumber = 0;
-
-var selectedSample = ee.Feature(
-  samples.toList(1, sampleNumber).get(0)
-);
-
-var selectedPoint = selectedSample.geometry();
-
-var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-  .filterBounds(selectedPoint.buffer(500))
-  .filterDate("2021-01-01", "2022-01-01")
-  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40))
-  .sort("CLOUDY_PIXEL_PERCENTAGE");
-
-print("Selected sample index:", sampleNumber);
-print("Selected coordinates:", selectedPoint.coordinates());
-print("Predicted class:",
-      classNames.get(selectedSample.get("LULC")));
-print("Available Sentinel-2 scenes:", s2.size());
-
-Map.layers().reset();
-Map.centerObject(selectedPoint, 16);
-
-Map.addLayer(
-  basin.style({
-    color: "red",
-    fillColor: "00000000",
-    width: 2
-  }),
-  {},
-  "Godavari Basin Boundary"
-);
-
-// Add the best available scene only if scenes exist.
-var hasS2 = s2.size().gt(0);
-
-var sentinelImage = ee.Image(
-  ee.Algorithms.If(
-    hasS2,
-    s2.first(),
-    ee.Image.constant([0, 0, 0]).rename(["B4", "B3", "B2"])
-  )
-);
-
-Map.addLayer(
-  sentinelImage.clip(selectedPoint.buffer(500)),
-  {
-    bands: ["B4", "B3", "B2"],
-    min: 200,
-    max: 2500,
-    gamma: 1.2
-  },
-  "Sentinel-2 RGB 2021"
-);
-
-Map.addLayer(
-  selectedPoint.buffer(100),
-  {color: "yellow"},
-  "Selected Sample - 100m buffer"
-);
-
-
-// ==========================================================
-// 3. LOAD ESA WORLDCOVER 2021
-// ==========================================================
-
-var worldCover = ee.ImageCollection("ESA/WorldCover/v200")
-  .first()
-  .select("Map")
-  .clip(basin);
-
-Map.addLayer(
-  worldCover,
-  {
-    min: 10,
-    max: 100,
-    palette: [
-      "006400", // Tree cover
-      "ffbb22", // Shrubland
-      "ffff4c", // Grassland
-      "f096ff", // Cropland
-      "fa0000", // Built-up
-      "b4b4b4", // Bare/sparse vegetation
-      "f0f0f0", // Snow and ice
-      "0064c8", // Permanent water
-      "0096a0", // Herbaceous wetland
-      "00cf75", // Mangroves
-      "fae6a0"  // Moss and lichen
-    ]
-  },
-  "ESA WorldCover 2021"
-);
-
-
-// ==========================================================
-// 4. MAP ESA CLASSES TO THE PROJECT'S SIX CLASSES
-// ==========================================================
-
-// ESA class codes:
-// 10 = Tree cover
-// 20 = Shrubland
-// 30 = Grassland
-// 40 = Cropland
-// 50 = Built-up
-// 60 = Bare/sparse vegetation
-// 70 = Snow and ice
-// 80 = Permanent water
-// 90 = Herbaceous wetland
-// 95 = Mangroves
-// 100 = Moss and lichen
-//
-// Project classes:
-// 0 = Water
-// 1 = Forest
-// 2 = Agriculture
-// 3 = Built-up
-// 4 = Barren
-// 5 = Grassland/Wasteland
-//
-// This crosswalk is approximate. Unmapped ESA classes
-// are masked and excluded from the agreement calculation.
-
-var mappedWorldCover = worldCover.remap(
-  [10, 20, 30, 40, 50, 60, 80],
-  [ 1,  5,  5,  2,  3,  4,  0],
-  255
-).rename("Reference_Candidate");
-
-// Mask unmapped classes instead of treating them as valid labels.
-mappedWorldCover = mappedWorldCover.updateMask(
-  mappedWorldCover.neq(255)
-);
-
-Map.addLayer(
-  mappedWorldCover,
-  {
-    min: 0,
-    max: 5,
-    palette: [
-      "419BDF", // Water
-      "397D49", // Forest
-      "E49635", // Agriculture
-      "C4281B", // Built-up
-      "A59B8F", // Barren
-      "88B053"  // Grassland/Wasteland
-    ]
-  },
-  "ESA mapped to six project classes"
-);
-
-
-// ==========================================================
-// 5. SAMPLE ESA CLASSES AT THE EXISTING 180 POINTS
-// ==========================================================
-
-var comparison = mappedWorldCover.sampleRegions({
-  collection: samples,
-  properties: ["LULC"],
-  scale: 10,
-  geometries: true
-});
-
-print("Valid comparison points:", comparison.size());
-print("Mapped reference class counts:",
-      comparison.aggregate_histogram("Reference_Candidate"));
-
-
-// ==========================================================
-// 6. ADD CLASS NAMES AND AGREEMENT FLAG
-// ==========================================================
-
-var results = comparison.map(function(feature) {
-  var predicted = ee.Number(feature.get("LULC"));
-  var reference = ee.Number(feature.get("Reference_Candidate"));
-
-  return feature.set({
-    "Predicted_Name": classNames.get(predicted.format()),
-    "Candidate_Name": classNames.get(reference.format()),
-    "Match": predicted.eq(reference)
-  });
-});
-
-var matching = results.filter(
-  ee.Filter.eq("Match", 1)
-);
-
-var nonMatching = results.filter(
-  ee.Filter.eq("Match", 0)
-);
-
-print("Valid comparison points:", results.size());
-print("Matching points:", matching.size());
-print("Non-matching points:", nonMatching.size());
-
-print("Comparison table - first 20 points:",
-      results.limit(20));
-
-
-// ==========================================================
-// 7. CALCULATE CROSS-PRODUCT AGREEMENT
-// ==========================================================
-
-var validCount = results.size();
-var matchCount = matching.size();
-
-var agreementPercent = ee.Algorithms.If(
-  validCount.gt(0),
-  ee.Number(matchCount).divide(validCount).multiply(100),
-  null
-);
-
-print("Cross-product agreement (%):", agreementPercent);
-
-
-// ==========================================================
-// 8. EXPORT COMPARISON TABLE TO GOOGLE DRIVE
-// ==========================================================
-
-Export.table.toDrive({
-  collection: results,
-  description: "Godavari_LULC_2021_CrossCheck",
-  fileNamePrefix: "Godavari_LULC_2021_CrossCheck",
-  fileFormat: "CSV",
-  selectors: [
-    "LULC",
-    "Predicted_Name",
-    "Reference_Candidate",
-    "Candidate_Name",
-    "Match",
-    ".geo"
-  ]
-});
-
-/***** STEP 2: MAP DISAGREEMENT LOCATIONS *****/
-
-// Matching points: green
-var matchingPoints = results.filter(
-  ee.Filter.eq("Match", 1)
-);
-
-// Non-matching points: red
-var disagreementPoints = results.filter(
-  ee.Filter.eq("Match", 0)
-);
-
-Map.addLayer(
-  matchingPoints.style({
-    color: "00FF00",
-    pointSize: 4,
-    width: 1
-  }),
-  {},
-  "Matching points"
-);
-
-Map.addLayer(
-  disagreementPoints.style({
-    color: "FF0000",
-    pointSize: 5,
-    width: 1
-  }),
-  {},
-  "Disagreement points"
-);
-
-// Zoom out to the entire Godavari Basin
-Map.centerObject(selectedPoint, 16);
-
-print("Review these disagreement points:",
-      disagreementPoints.limit(20));
-print(
-  "Selected Sentinel-2 image date:",
-  
-  ee.Date(ee.Image(s2.first()).get("system:time_start"))
-    .format("YYYY-MM-dd")
-);
-
-/***** CHECK WATER AT DIFFERENT TIMES IN 2021 *****/
-
-var dates = [
-  ["January", "2021-01-01", "2021-02-01"],
-  ["April", "2021-04-01", "2021-05-01"],
-  ["July", "2021-07-01", "2021-08-01"],
-  ["October", "2021-10-01", "2021-11-01"]
+// 1. Build cloud-masked monthly Sentinel-2 composites.
+var screeningMonths = [
+  {name: "Jan", start: "2021-01-01", end: "2021-02-01"},
+  {name: "Apr", start: "2021-04-01", end: "2021-05-01"},
+  {name: "Oct", start: "2021-10-01", end: "2021-11-01"}
 ];
 
-dates.forEach(function(item) {
-  var monthly = ee.ImageCollection(
-      "COPERNICUS/S2_SR_HARMONIZED"
-    )
-    .filterBounds(selectedPoint.buffer(500))
-    .filterDate(item[1], item[2])
-    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40))
-    .sort("CLOUDY_PIXEL_PERCENTAGE");
-
-  print(item[0] + " scene count:", monthly.size());
-
-  var image = ee.Image(monthly.median());
-
-  Map.addLayer(
-    image.clip(selectedPoint.buffer(500)),
-    {bands: ["B4", "B3", "B2"], min: 200, max: 2500},
-    item[0] + " 2021 RGB",
-    false
-  );
-});
-
-/***** CHECK SEASONAL WATER SIGNAL AT SAMPLE 0 *****/
-
-function checkWaterSignal(month, start, end) {
+function makeMonthlyIndices(month) {
   var collection = ee.ImageCollection(
     "COPERNICUS/S2_SR_HARMONIZED"
   )
-    .filterBounds(selectedPoint.buffer(100))
-    .filterDate(start, end)
-    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40));
+    .filterBounds(basin)
+    .filterDate(month.start, month.end)
+    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40))
+    .map(function(image) {
+      var scl = image.select("SCL");
+      var clearMask = scl.neq(0)
+        .and(scl.neq(1))
+        .and(scl.neq(3))
+        .and(scl.neq(8))
+        .and(scl.neq(9))
+        .and(scl.neq(10))
+        .and(scl.neq(11));
+
+      return image.updateMask(clearMask);
+    });
+
+  print(month.name + " usable scene count:", collection.size());
 
   var composite = collection.median();
-
-  // Mask clouds and cloud shadows using the SCL band.
-  var scl = composite.select("SCL");
-  var clear = scl.neq(3)   // cloud shadow
-    .and(scl.neq(8))       // medium-probability cloud
-    .and(scl.neq(9))       // high-probability cloud
-    .and(scl.neq(10))      // cirrus
-    .and(scl.neq(11));     // snow/ice
-
-  composite = composite.updateMask(clear);
-
-  var ndwi = composite.normalizedDifference(
-    ["B3", "B8"]
-  ).rename("NDWI");
-
-  var value = ndwi.reduceRegion({
-    reducer: ee.Reducer.mean(),
-    geometry: selectedPoint,
-    scale: 10,
-    bestEffort: true
-  });
-
-  print(month + " NDWI:", value.get("NDWI"));
-}
-
-checkWaterSignal("January", "2021-01-01", "2021-02-01");
-checkWaterSignal("April", "2021-04-01", "2021-05-01");
-checkWaterSignal("October", "2021-10-01", "2021-11-01");
-function checkWaterAndVegetation(month, start, end) {
-  var collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-    .filterBounds(selectedPoint.buffer(100))
-    .filterDate(start, end)
-    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40));
-
-  var composite = collection.median();
-
-  var ndwi = composite.normalizedDifference(["B3", "B8"])
-    .rename("NDWI");
 
   var ndvi = composite.normalizedDifference(["B8", "B4"])
-    .rename("NDVI");
+    .rename(month.name + "_NDVI");
 
-  var values = ndwi.addBands(ndvi).reduceRegion({
-    reducer: ee.Reducer.first(),
-    geometry: selectedPoint,
-    scale: 10,
-    maxPixels: 1e6
-  });
+  var ndwi = composite.normalizedDifference(["B3", "B8"])
+    .rename(month.name + "_NDWI");
 
-  print(month + " NDWI and NDVI:", values);
+  // -9999 marks missing pixels; it is not a real index value.
+  return ndvi.addBands(ndwi).unmask(-9999);
 }
 
-checkWaterAndVegetation("January",
-  "2021-01-01", "2021-02-01");
+var indexStack = ee.Image.cat(
+  screeningMonths.map(makeMonthlyIndices)
+);
 
-checkWaterAndVegetation("April",
-  "2021-04-01", "2021-05-01");
+// 2. Extract indices at every existing sample point.
+var indexResults = indexStack.sampleRegions({
+  collection: samples,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
 
-checkWaterAndVegetation("October",
-  "2021-10-01", "2021-11-01");
+// 3. Flag potential issues without changing original LULC labels.
+var screenedSamples = indexResults.map(function(f) {
+  var valid = ee.Number(f.get("Jan_NDVI")).neq(-9999)
+    .and(ee.Number(f.get("Apr_NDVI")).neq(-9999))
+    .and(ee.Number(f.get("Oct_NDVI")).neq(-9999));
+
+  var janV = ee.Number(f.get("Jan_NDVI"));
+  var aprV = ee.Number(f.get("Apr_NDVI"));
+  var octV = ee.Number(f.get("Oct_NDVI"));
+
+  var janW = ee.Number(f.get("Jan_NDWI"));
+  var aprW = ee.Number(f.get("Apr_NDWI"));
+  var octW = ee.Number(f.get("Oct_NDWI"));
+
+  var predictedClass = ee.Number(f.get("LULC"));
+
+  // Heuristic flag: water-labelled point with persistent
+  // vegetation and negative NDWI in all three months.
+  var possibleWaterError = predictedClass.eq(0)
+    .and(janV.gt(0.25))
+    .and(aprV.gt(0.25))
+    .and(octV.gt(0.35))
+    .and(janW.lt(0))
+    .and(aprW.lt(0))
+    .and(octW.lt(0));
+
+  var status = ee.String(ee.Algorithms.If(
+    valid.not(),
+    "INSUFFICIENT_DATA",
+    ee.Algorithms.If(
+      possibleWaterError,
+      "REVIEW_WATER_LABEL",
+      "NO_WATER_FLAG"
+    )
+  ));
+
+  return f.set({
+    "Indices_Valid": valid,
+    "Review_Flag": status
+  });
+});
+
+// 4. Print summary.
+print("Total screened samples:", screenedSamples.size());
+
+print("Samples flagged for water-label review:",
+  screenedSamples.filter(
+    ee.Filter.eq("Review_Flag", "REVIEW_WATER_LABEL")
+  ).size()
+);
+
+print("Samples with insufficient data:",
+  screenedSamples.filter(
+    ee.Filter.eq("Review_Flag", "INSUFFICIENT_DATA")
+  ).size()
+);
+
+print("Flagged sample examples:",
+  screenedSamples.filter(
+    ee.Filter.eq("Review_Flag", "REVIEW_WATER_LABEL")
+  ).limit(20)
+);
+
+// 5. Export the screening results.
+Export.table.toDrive({
+  collection: screenedSamples,
+  description: "Godavari_LULC_2021_Automated_Screening",
+  fileNamePrefix: "Godavari_LULC_2021_Automated_Screening",
+  fileFormat: "CSV",
+  selectors: [
+    "LULC",
+    "Jan_NDVI", "Jan_NDWI",
+    "Apr_NDVI", "Apr_NDWI",
+    "Oct_NDVI", "Oct_NDWI",
+    "Indices_Valid",
+    "Review_Flag",
+    ".geo"
+  ]
+});
