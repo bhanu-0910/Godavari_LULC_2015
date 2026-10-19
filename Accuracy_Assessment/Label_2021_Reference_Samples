@@ -1,4 +1,25 @@
 
+/************************************************************
+ GODAVARI BASIN - LULC 2021 CROSS-PRODUCT COMPARISON
+
+ Original classes:
+ 0 = Water
+ 1 = Forest
+ 2 = Agriculture
+ 3 = Built-up
+ 4 = Barren
+ 5 = Grassland/Wasteland
+
+ IMPORTANT:
+ ESA WorldCover comparison is NOT verified ground-truth
+ accuracy. It measures agreement between two products.
+************************************************************/
+
+
+// ==========================================================
+// 1. LOAD BASIN AND EXISTING SAMPLE POINTS
+// ==========================================================
+
 var basin = ee.FeatureCollection(
   "projects/fine-slice-478618-n5/assets/Godavari_Basin"
 );
@@ -16,8 +37,16 @@ var classNames = ee.Dictionary({
   5: "Grassland/Wasteland"
 });
 
-// Change this index to inspect another sample.
-// Index 0 = first sample, 1 = second sample, etc.
+print("Total sample points:", samples.size());
+print("Original predicted class counts:",
+      samples.aggregate_histogram("LULC"));
+
+
+// ==========================================================
+// 2. INSPECT ONE SAMPLE USING SENTINEL-2
+// ==========================================================
+
+// Change the index from 0 to 1, 2, 3... to inspect another point.
 var sampleNumber = 0;
 
 var selectedSample = ee.Feature(
@@ -32,125 +61,146 @@ var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
   .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40))
   .sort("CLOUDY_PIXEL_PERCENTAGE");
 
-print("Total samples:", samples.size());
-print("Sample class counts:", samples.aggregate_histogram("LULC"));
-print("Sample index:", sampleNumber);
-print("Coordinates:", selectedPoint.coordinates());
-print("Predicted class:", classNames.get(selectedSample.get("LULC")));
+print("Selected sample index:", sampleNumber);
+print("Selected coordinates:", selectedPoint.coordinates());
+print("Predicted class:",
+      classNames.get(selectedSample.get("LULC")));
 print("Available Sentinel-2 scenes:", s2.size());
 
-// Map
 Map.layers().reset();
 Map.centerObject(selectedPoint, 16);
 
 Map.addLayer(
-  basin.style({color: "red", fillColor: "00000000", width: 2}),
+  basin.style({
+    color: "red",
+    fillColor: "00000000",
+    width: 2
+  }),
   {},
-  "Godavari Basin"
+  "Godavari Basin Boundary"
+);
+
+// Add the best available scene only if scenes exist.
+var hasS2 = s2.size().gt(0);
+
+var sentinelImage = ee.Image(
+  ee.Algorithms.If(
+    hasS2,
+    s2.first(),
+    ee.Image.constant([0, 0, 0]).rename(["B4", "B3", "B2"])
+  )
 );
 
 Map.addLayer(
-  ee.Image(s2.first()).clip(selectedPoint.buffer(500)),
-  {bands: ["B4", "B3", "B2"], min: 200, max: 2500, gamma: 1.2},
-  "2021 Reference Image"
+  sentinelImage.clip(selectedPoint.buffer(500)),
+  {
+    bands: ["B4", "B3", "B2"],
+    min: 200,
+    max: 2500,
+    gamma: 1.2
+  },
+  "Sentinel-2 RGB 2021"
 );
 
-// Small marker only; no large blue circle
 Map.addLayer(
   selectedPoint,
   {color: "blue"},
   "Selected Sample Point"
 );
 
-// Generate independent imagery-based candidate labels
-// using Dynamic World probabilities for 2021.
-// These are candidates, NOT verified reference labels.
 
-var dw2021 = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
-  .filterBounds(basin)
-  .filterDate("2021-01-01", "2022-01-01")
-  .select([
-    "water", "trees", "grass", "flooded_vegetation",
-    "crops", "shrub_and_scrub", "built", "bare"
-  ])
-  .median()
-  .clip(basin);
+// ==========================================================
+// 3. LOAD ESA WORLDCOVER 2021
+// ==========================================================
 
-// Convert the 8 probability bands to the project's 6 classes.
-var candidateProbabilities = ee.Image.cat([
-  dw2021.select("water")
-    .add(dw2021.select("flooded_vegetation"))
-    .rename("Water"),
-  dw2021.select("trees").rename("Forest"),
-  dw2021.select("crops").rename("Agriculture"),
-  dw2021.select("built").rename("Built-up"),
-  dw2021.select("bare").rename("Barren"),
-  dw2021.select("grass")
-    .add(dw2021.select("shrub_and_scrub"))
-    .rename("Grassland_Wasteland")
-]);
-
-var candidateClass = candidateProbabilities
-  .toArray()
-  .arrayArgmax()
-  .arrayGet([0])
-  .rename("Candidate_Reference_LULC");
-
-// Extract candidate labels at all sample points.
-var candidateTable = candidateClass.sampleRegions({
-  collection: samples,
-  properties: ["LULC"],
-  scale: 10,
-  geometries: true
-});
-
-print("Candidate labels (not verified):", candidateTable.limit(10));
-print("Candidate sample count:", candidateTable.size());
-print("Candidate class counts:",
-      candidateTable.aggregate_histogram("Candidate_Reference_LULC"));
-
-/***** STEP 2: ESA WORLDCOVER CROSS-CHECK *****/
-
-// Independent land-cover product for comparison
 var worldCover = ee.ImageCollection("ESA/WorldCover/v200")
   .first()
   .select("Map")
   .clip(basin);
 
-// Sample WorldCover classes at the same 180 locations
-var worldCoverSamples = worldCover.sampleRegions({
-  collection: samples,
-  properties: ["LULC"],
-  scale: 10,
-  geometries: true
-});
-
-// Display results
-print("ESA WorldCover sample count:", worldCoverSamples.size());
-print("ESA WorldCover class counts:",
-      worldCoverSamples.aggregate_histogram("Map"));
-print("First 10 cross-check samples:",
-      worldCoverSamples.limit(10));
-
-// Show the WorldCover map
 Map.addLayer(
   worldCover,
   {
     min: 10,
     max: 100,
     palette: [
-      "006400", "ffbb22", "ffff4c", "f096ff",
-      "fa0000", "b4b4b4", "f0f0f0", "0064c8",
-      "0096a0", "00cf75", "fae6a0"
+      "006400", // Tree cover
+      "ffbb22", // Shrubland
+      "ffff4c", // Grassland
+      "f096ff", // Cropland
+      "fa0000", // Built-up
+      "b4b4b4", // Bare/sparse vegetation
+      "f0f0f0", // Snow and ice
+      "0064c8", // Permanent water
+      "0096a0", // Herbaceous wetland
+      "00cf75", // Mangroves
+      "fae6a0"  // Moss and lichen
     ]
   },
   "ESA WorldCover 2021"
 );
 
+
+// ==========================================================
+// 4. MAP ESA CLASSES TO THE PROJECT'S SIX CLASSES
+// ==========================================================
+
+// ESA class codes:
+// 10 = Tree cover
+// 20 = Shrubland
+// 30 = Grassland
+// 40 = Cropland
+// 50 = Built-up
+// 60 = Bare/sparse vegetation
+// 70 = Snow and ice
+// 80 = Permanent water
+// 90 = Herbaceous wetland
+// 95 = Mangroves
+// 100 = Moss and lichen
+//
+// Project classes:
+// 0 = Water
+// 1 = Forest
+// 2 = Agriculture
+// 3 = Built-up
+// 4 = Barren
+// 5 = Grassland/Wasteland
+//
+// This crosswalk is approximate. Unmapped ESA classes
+// are masked and excluded from the agreement calculation.
+
 var mappedWorldCover = worldCover.remap(
   [10, 20, 30, 40, 50, 60, 80],
-  [ 1,  5,  5,  2,  3,  4,  0]
+  [ 1,  5,  5,  2,  3,  4,  0],
+  255
 ).rename("Reference_Candidate");
+
+// Mask unmapped classes instead of treating them as valid labels.
+mappedWorldCover = mappedWorldCover.updateMask(
+  mappedWorldCover.neq(255)
+);
+
+Map.addLayer(
+  mappedWorldCover,
+  {
+    min: 0,
+    max: 5,
+    palette: [
+      "419BDF", // Water
+      "397D49", // Forest
+      "E49635", // Agriculture
+      "C4281B", // Built-up
+      "A59B8F", // Barren
+      "88B053"  // Grassland/Wasteland
+    ]
+  },
+  "ESA mapped to six project classes"
+);
+
+
+// ==========================================================
+// 5. SAMPLE ESA CLASSES AT THE EXISTING 180 POINTS
+// ==========================================================
 
 var comparison = mappedWorldCover.sampleRegions({
   collection: samples,
@@ -159,13 +209,73 @@ var comparison = mappedWorldCover.sampleRegions({
   geometries: true
 });
 
-var matched = comparison.map(function(feature) {
+print("Valid comparison points:", comparison.size());
+print("Mapped reference class counts:",
+      comparison.aggregate_histogram("Reference_Candidate"));
+
+
+// ==========================================================
+// 6. ADD CLASS NAMES AND AGREEMENT FLAG
+// ==========================================================
+
+var results = comparison.map(function(feature) {
   var predicted = ee.Number(feature.get("LULC"));
   var reference = ee.Number(feature.get("Reference_Candidate"));
-  return feature.set("Match", predicted.eq(reference));
+
+  return feature.set({
+    "Predicted_Name": classNames.get(predicted.format()),
+    "Candidate_Name": classNames.get(reference.format()),
+    "Match": predicted.eq(reference)
+  });
 });
 
-print("Total comparison points:", matched.size());
-print("Matching points:", matched.filter(ee.Filter.eq("Match", 1)).size());
-print("Non-matching points:", matched.filter(ee.Filter.eq("Match", 0)).size());
-print("Comparison table:", matched.limit(10));
+var matching = results.filter(
+  ee.Filter.eq("Match", 1)
+);
+
+var nonMatching = results.filter(
+  ee.Filter.eq("Match", 0)
+);
+
+print("Valid comparison points:", results.size());
+print("Matching points:", matching.size());
+print("Non-matching points:", nonMatching.size());
+
+print("Comparison table - first 20 points:",
+      results.limit(20));
+
+
+// ==========================================================
+// 7. CALCULATE CROSS-PRODUCT AGREEMENT
+// ==========================================================
+
+var validCount = results.size();
+var matchCount = matching.size();
+
+var agreementPercent = ee.Algorithms.If(
+  validCount.gt(0),
+  ee.Number(matchCount).divide(validCount).multiply(100),
+  null
+);
+
+print("Cross-product agreement (%):", agreementPercent);
+
+
+// ==========================================================
+// 8. EXPORT COMPARISON TABLE TO GOOGLE DRIVE
+// ==========================================================
+
+Export.table.toDrive({
+  collection: results,
+  description: "Godavari_LULC_2021_CrossCheck",
+  fileNamePrefix: "Godavari_LULC_2021_CrossCheck",
+  fileFormat: "CSV",
+  selectors: [
+    "LULC",
+    "Predicted_Name",
+    "Reference_Candidate",
+    "Candidate_Name",
+    "Match",
+    ".geo"
+  ]
+});
