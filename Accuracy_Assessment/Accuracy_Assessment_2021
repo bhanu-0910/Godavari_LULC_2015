@@ -38,4 +38,35 @@ Map.addLayer(lulc2021, {
   ]
 }, "LULC 2021 for Accuracy Assessment");
 
+ // 5. Generate 100 sample points per LULC class
+var samples2021 = lulc2021.stratifiedSample({
+  numPoints: 100,
+  classBand: "LULC",
+  region: basin.geometry(),
+  scale: 10,
+  seed: 42,
+  geometries: true,
+  dropNulls: true,
+  tileScale: 4
+});
+
+print("2021 reference sample locations:", samples2021);
+print("Total sample points:", samples2021.size());
+
+Map.addLayer(
+  samples2021,
+  {color: "yellow"},
+  "2021 Sample Locations"
+);
+
+// Export sample locations to Google Drive
+Export.table.toDrive({
+  collection: samples2021,
+  description: "Godavari_LULC_2021_Sample_Locations",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2021_Sample_Locations",
+  fileFormat: "CSV"
+});
+
+
 print("2021 LULC map:", lulc2021);
