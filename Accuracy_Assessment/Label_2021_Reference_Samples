@@ -319,6 +319,109 @@ print("Review these disagreement points:",
       disagreementPoints.limit(20));
 print(
   "Selected Sentinel-2 image date:",
+  
   ee.Date(ee.Image(s2.first()).get("system:time_start"))
     .format("YYYY-MM-dd")
 );
+
+/***** CHECK WATER AT DIFFERENT TIMES IN 2021 *****/
+
+var dates = [
+  ["January", "2021-01-01", "2021-02-01"],
+  ["April", "2021-04-01", "2021-05-01"],
+  ["July", "2021-07-01", "2021-08-01"],
+  ["October", "2021-10-01", "2021-11-01"]
+];
+
+dates.forEach(function(item) {
+  var monthly = ee.ImageCollection(
+      "COPERNICUS/S2_SR_HARMONIZED"
+    )
+    .filterBounds(selectedPoint.buffer(500))
+    .filterDate(item[1], item[2])
+    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40))
+    .sort("CLOUDY_PIXEL_PERCENTAGE");
+
+  print(item[0] + " scene count:", monthly.size());
+
+  var image = ee.Image(monthly.median());
+
+  Map.addLayer(
+    image.clip(selectedPoint.buffer(500)),
+    {bands: ["B4", "B3", "B2"], min: 200, max: 2500},
+    item[0] + " 2021 RGB",
+    false
+  );
+});
+
+/***** CHECK SEASONAL WATER SIGNAL AT SAMPLE 0 *****/
+
+function checkWaterSignal(month, start, end) {
+  var collection = ee.ImageCollection(
+    "COPERNICUS/S2_SR_HARMONIZED"
+  )
+    .filterBounds(selectedPoint.buffer(100))
+    .filterDate(start, end)
+    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40));
+
+  var composite = collection.median();
+
+  // Mask clouds and cloud shadows using the SCL band.
+  var scl = composite.select("SCL");
+  var clear = scl.neq(3)   // cloud shadow
+    .and(scl.neq(8))       // medium-probability cloud
+    .and(scl.neq(9))       // high-probability cloud
+    .and(scl.neq(10))      // cirrus
+    .and(scl.neq(11));     // snow/ice
+
+  composite = composite.updateMask(clear);
+
+  var ndwi = composite.normalizedDifference(
+    ["B3", "B8"]
+  ).rename("NDWI");
+
+  var value = ndwi.reduceRegion({
+    reducer: ee.Reducer.mean(),
+    geometry: selectedPoint,
+    scale: 10,
+    bestEffort: true
+  });
+
+  print(month + " NDWI:", value.get("NDWI"));
+}
+
+checkWaterSignal("January", "2021-01-01", "2021-02-01");
+checkWaterSignal("April", "2021-04-01", "2021-05-01");
+checkWaterSignal("October", "2021-10-01", "2021-11-01");
+function checkWaterAndVegetation(month, start, end) {
+  var collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+    .filterBounds(selectedPoint.buffer(100))
+    .filterDate(start, end)
+    .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40));
+
+  var composite = collection.median();
+
+  var ndwi = composite.normalizedDifference(["B3", "B8"])
+    .rename("NDWI");
+
+  var ndvi = composite.normalizedDifference(["B8", "B4"])
+    .rename("NDVI");
+
+  var values = ndwi.addBands(ndvi).reduceRegion({
+    reducer: ee.Reducer.first(),
+    geometry: selectedPoint,
+    scale: 10,
+    maxPixels: 1e6
+  });
+
+  print(month + " NDWI and NDVI:", values);
+}
+
+checkWaterAndVegetation("January",
+  "2021-01-01", "2021-02-01");
+
+checkWaterAndVegetation("April",
+  "2021-04-01", "2021-05-01");
+
+checkWaterAndVegetation("October",
+  "2021-10-01", "2021-11-01");
