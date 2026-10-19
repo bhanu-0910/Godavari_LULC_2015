@@ -1,0 +1,70 @@
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 6);
+
+// Dynamic World labels for 2021
+var dw2021 = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+  .filterDate("2021-01-01", "2022-01-01")
+  .filterBounds(basin)
+  .select("label");
+
+print("2021 Dynamic World image count", dw2021.size());
+
+// Annual modal classification
+var label2021 = dw2021.mode().clip(basin);
+
+// Convert 9 Dynamic World labels into our 6 project classes:
+// 0 Water, 1 Forest, 2 Agriculture,
+// 3 Built-up, 4 Barren, 5 Grassland/Wasteland
+var lulc2021 = label2021.remap(
+  [0, 3, 1, 4, 6, 7, 8, 2, 5],
+  [0, 0, 1, 2, 3, 4, 4, 5, 5]
+).rename("LULC").toByte();
+
+var palette = [
+  "419BDF", // Water
+  "397D49", // Forest
+  "E49635", // Agriculture
+  "C4281B", // Built-up
+  "A59B8F", // Barren
+  "88B053"  // Grassland/Wasteland
+];
+
+Map.addLayer(
+  lulc2021,
+  {min: 0, max: 5, palette: palette},
+  "Godavari LULC 2021"
+);
+
+// Calculate area by class in hectares
+var areaImage = ee.Image.pixelArea()
+  .divide(10000)
+  .addBands(lulc2021);
+
+var area2021 = areaImage.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: "class"
+  }),
+  geometry: basin.geometry(),
+  scale: 100,
+  bestEffort: true,
+  maxPixels: 1e13,
+  tileScale: 4
+});
+
+print("2021 LULC area (hectares)", area2021);
+
+// Export classified map to Google Drive
+Export.image.toDrive({
+  image: lulc2021,
+  description: "Godavari_LULC_2021",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2021",
+  region: basin.geometry(),
+  scale: 10,
+  maxPixels: 1e13
+});
