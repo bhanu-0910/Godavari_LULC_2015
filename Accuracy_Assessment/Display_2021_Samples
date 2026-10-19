@@ -92,12 +92,17 @@ var s2PointImage = s2Collection
 
 Map.addLayer(
   s2PointImage,
-  {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
+  {bands: ["B4", "B3", "B2"], min: 200, max: 2500, gamma: 1.2},
   "Single Sentinel-2 Scene 2021",
   true
 );
 
 Map.centerObject(selectedPoint, 16);
+Map.addLayer(
+  selectedPoint.buffer(15),
+  {color: "FFFF00"},
+  "Sample Location Highlight"
+);
 
 
 
