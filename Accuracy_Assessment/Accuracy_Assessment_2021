@@ -39,25 +39,21 @@ Map.addLayer(lulc2021, {
 }, "LULC 2021 for Accuracy Assessment");
 
  // 5. Generate 100 sample points per LULC class
+
 var samples2021 = lulc2021.stratifiedSample({
-  numPoints: 100,
+  numPoints: 30,
   classBand: "LULC",
   region: basin.geometry(),
-  scale: 10,
+  scale: 100,
   seed: 42,
   geometries: true,
   dropNulls: true,
-  tileScale: 4
+  tileScale: 8
 });
 
-print("2021 reference sample locations:", samples2021);
-print("Total sample points:", samples2021.size());
+print("Sample points:", samples2021.size());
+Map.addLayer(samples2021, {color: "yellow"}, "Sample points");
 
-Map.addLayer(
-  samples2021,
-  {color: "yellow"},
-  "2021 Sample Locations"
-);
 
 // Export sample locations to Google Drive
 Export.table.toDrive({
