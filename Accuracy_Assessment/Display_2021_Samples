@@ -77,19 +77,27 @@ Map.addLayer(
 print("Selected sample:", selectedSample);
 print("Predicted LULC class:", selectedSample.get("LULC"));
 
-var s2PointImage = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+
+var s2Collection = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
   .filterBounds(selectedPoint.buffer(500))
   .filterDate("2021-01-01", "2022-01-01")
-  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-  .median()
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40));
+
+print("Sentinel-2 scenes found:", s2Collection.size());
+
+var s2PointImage = s2Collection
+  .sort("CLOUDY_PIXEL_PERCENTAGE")
+  .first()
   .clip(selectedPoint.buffer(500));
 
 Map.addLayer(
   s2PointImage,
   {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
-  "2021 Sentinel-2 Sample Detail"
+  "Single Sentinel-2 Scene 2021",
+  true
 );
 
 Map.centerObject(selectedPoint, 16);
+
 
 
