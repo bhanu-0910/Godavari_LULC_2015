@@ -1,0 +1,48 @@
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+var samples = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
+);
+
+Map.centerObject(basin, 7);
+
+var classNames = ee.Dictionary({
+  0: "Water",
+  1: "Forest",
+  2: "Agriculture",
+  3: "Built-up",
+  4: "Barren",
+  5: "Grassland/Wasteland"
+});
+
+print("Total samples:", samples.size());
+print("Sample class counts:", samples.aggregate_histogram("LULC"));
+
+var sampleNumber = 0;
+var selectedSample = ee.Feature(samples.toList(samples.size()).get(sampleNumber));
+var selectedPoint = selectedSample.geometry();
+
+Map.addLayer(
+  basin.style({color: "red", fillColor: "00000000", width: 2}),
+  {},
+  "Godavari Basin"
+);
+
+Map.addLayer(samples, {color: "yellow"}, "All 180 Samples");
+Map.addLayer(
+  selectedPoint.buffer(20),
+  {color: "blue"},
+  "Selected Sample"
+);
+
+print("Sample index:", sampleNumber);
+print("Predicted class code:", selectedSample.get("LULC"));
+print(
+  "Predicted class name:",
+  classNames.get(selectedSample.get("LULC"))
+);
+
+Map.centerObject(selectedPoint, 16);
