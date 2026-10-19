@@ -1,0 +1,45 @@
+
+// Load Godavari Basin
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+// Load uploaded sample points
+var samples = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
+);
+
+// Load 2021 LULC map again
+var dw2021 = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+  .filterBounds(basin)
+  .filterDate("2021-01-01", "2022-01-01")
+  .select("label")
+  .mode()
+  .clip(basin);
+
+var lulc2021 = ee.Image(0)
+  .where(dw2021.eq(0), 0)
+  .where(dw2021.eq(1), 1)
+  .where(dw2021.eq(2), 5)
+  .where(dw2021.eq(3), 0)
+  .where(dw2021.eq(4), 2)
+  .where(dw2021.eq(5), 5)
+  .where(dw2021.eq(6), 3)
+  .where(dw2021.eq(7), 4)
+  .where(dw2021.eq(8), 4)
+  .rename("LULC")
+  .clip(basin);
+
+// Display basin and sample locations
+Map.centerObject(basin, 7);
+Map.addLayer(
+  basin.style({color: "red", fillColor: "00000000", width: 2}),
+  {},
+  "Godavari Basin"
+);
+
+Map.addLayer(samples, {color: "yellow"}, "2021 Sample Points");
+
+print("Sample table:", samples);
+print("Sample count:", samples.size());
+print("2021 LULC map:", lulc2021);
