@@ -61,3 +61,50 @@ Map.addLayer(
   {color: "blue"},
   "Selected Sample Point"
 );
+
+// Generate independent imagery-based candidate labels
+// using Dynamic World probabilities for 2021.
+// These are candidates, NOT verified reference labels.
+
+var dw2021 = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+  .filterBounds(basin)
+  .filterDate("2021-01-01", "2022-01-01")
+  .select([
+    "water", "trees", "grass", "flooded_vegetation",
+    "crops", "shrub_and_scrub", "built", "bare"
+  ])
+  .median()
+  .clip(basin);
+
+// Convert the 8 probability bands to the project's 6 classes.
+var candidateProbabilities = ee.Image.cat([
+  dw2021.select("water")
+    .add(dw2021.select("flooded_vegetation"))
+    .rename("Water"),
+  dw2021.select("trees").rename("Forest"),
+  dw2021.select("crops").rename("Agriculture"),
+  dw2021.select("built").rename("Built-up"),
+  dw2021.select("bare").rename("Barren"),
+  dw2021.select("grass")
+    .add(dw2021.select("shrub_and_scrub"))
+    .rename("Grassland_Wasteland")
+]);
+
+var candidateClass = candidateProbabilities
+  .toArray()
+  .arrayArgmax()
+  .arrayGet([0])
+  .rename("Candidate_Reference_LULC");
+
+// Extract candidate labels at all sample points.
+var candidateTable = candidateClass.sampleRegions({
+  collection: samples,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true
+});
+
+print("Candidate labels (not verified):", candidateTable.limit(10));
+print("Candidate sample count:", candidateTable.size());
+print("Candidate class counts:",
+      candidateTable.aggregate_histogram("Candidate_Reference_LULC"));
