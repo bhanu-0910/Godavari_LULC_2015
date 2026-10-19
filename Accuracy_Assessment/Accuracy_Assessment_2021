@@ -1,0 +1,41 @@
+
+ // 1. Load Godavari Basin
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+// 2. Recreate 2021 Dynamic World LULC
+var dw2021 = ee.ImageCollection("GOOGLE/DYNAMICWORLD/V1")
+  .filterBounds(basin)
+  .filterDate("2021-01-01", "2022-01-01")
+  .select("label")
+  .mode()
+  .clip(basin);
+
+// 3. Reclassify to the six project classes
+var lulc2021 = ee.Image(0)
+  .where(dw2021.eq(0), 0)
+  .where(dw2021.eq(1), 1)
+  .where(dw2021.eq(2), 5)
+  .where(dw2021.eq(3), 0)
+  .where(dw2021.eq(4), 2)
+  .where(dw2021.eq(5), 5)
+  .where(dw2021.eq(6), 3)
+  .where(dw2021.eq(7), 4)
+  .where(dw2021.eq(8), 4)
+  .rename("LULC")
+  .clip(basin);
+
+// 4. Display map
+Map.centerObject(basin, 7);
+Map.addLayer(basin, {color: "red"}, "Godavari Basin");
+Map.addLayer(lulc2021, {
+  min: 0,
+  max: 5,
+  palette: [
+    "419BDF", "397D49", "E49635",
+    "C4281B", "A59B8F", "88B053"
+  ]
+}, "LULC 2021 for Accuracy Assessment");
+
+print("2021 LULC map:", lulc2021);
