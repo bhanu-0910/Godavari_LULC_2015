@@ -57,3 +57,24 @@ Map.addLayer(
   "Sentinel-2 Reference Imagery 2021"
 );
 
+ // Select one sample point to inspect
+var sampleList = samples.toList(samples.size());
+
+// Change this number from 0 to 179 to inspect another point
+var sampleNumber = 0;
+
+var selectedSample = ee.Feature(sampleList.get(sampleNumber));
+var selectedPoint = selectedSample.geometry();
+
+Map.centerObject(selectedPoint, 16);
+
+Map.addLayer(
+  selectedPoint,
+  {color: "yellow"},
+  "Selected Sample"
+);
+
+print("Selected sample:", selectedSample);
+print("Predicted LULC class:", selectedSample.get("LULC"));
+
+
