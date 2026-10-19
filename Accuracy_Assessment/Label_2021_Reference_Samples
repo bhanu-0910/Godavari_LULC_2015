@@ -108,3 +108,41 @@ print("Candidate labels (not verified):", candidateTable.limit(10));
 print("Candidate sample count:", candidateTable.size());
 print("Candidate class counts:",
       candidateTable.aggregate_histogram("Candidate_Reference_LULC"));
+
+/***** STEP 2: ESA WORLDCOVER CROSS-CHECK *****/
+
+// Independent land-cover product for comparison
+var worldCover = ee.ImageCollection("ESA/WorldCover/v200")
+  .first()
+  .select("Map")
+  .clip(basin);
+
+// Sample WorldCover classes at the same 180 locations
+var worldCoverSamples = worldCover.sampleRegions({
+  collection: samples,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true
+});
+
+// Display results
+print("ESA WorldCover sample count:", worldCoverSamples.size());
+print("ESA WorldCover class counts:",
+      worldCoverSamples.aggregate_histogram("Map"));
+print("First 10 cross-check samples:",
+      worldCoverSamples.limit(10));
+
+// Show the WorldCover map
+Map.addLayer(
+  worldCover,
+  {
+    min: 10,
+    max: 100,
+    palette: [
+      "006400", "ffbb22", "ffff4c", "f096ff",
+      "fa0000", "b4b4b4", "f0f0f0", "0064c8",
+      "0096a0", "00cf75", "fae6a0"
+    ]
+  },
+  "ESA WorldCover 2021"
+);
