@@ -430,3 +430,51 @@ Export.table.toDrive({
   ]
 });
 
+var allSamples = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
+);
+
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .filterBounds(allSamples)
+  .filterDate("2021-01-01", "2022-01-01")
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30));
+
+var composite = s2.median();
+
+var indices = composite.expression(
+  "(nir - red) / (nir + red)", {
+    nir: composite.select("B8"),
+    red: composite.select("B4")
+  }).rename("NDVI");
+
+var waterIndex = composite.expression(
+  "(green - nir) / (green + nir)", {
+    green: composite.select("B3"),
+    nir: composite.select("B8")
+  }).rename("NDWI");
+
+var evidence = composite.select(
+  ["B2", "B3", "B4", "B8"],
+  ["Blue", "Green", "Red", "NIR"]
+).addBands([indices, waterIndex]);
+
+var evidenceTable = evidence.sampleRegions({
+  collection: allSamples,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+print("Evidence records:", evidenceTable.size());
+print("Example evidence:", evidenceTable.first());
+
+Export.table.toDrive({
+  collection: evidenceTable,
+  description: "Godavari_2021_Sentinel2_Evidence",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2021_Sentinel2_Evidence",
+  fileFormat: "CSV"
+});
+
+
