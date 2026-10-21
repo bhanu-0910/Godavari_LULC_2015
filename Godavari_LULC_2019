@@ -1,0 +1,147 @@
+
+/************************************************************
+ GODAVARI BASIN — LULC 2019
+ Dynamic World | Six consistent classes
+************************************************************/
+
+// 1. Study area
+var basin = ee.FeatureCollection(
+  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
+);
+var geometry = basin.geometry();
+
+Map.centerObject(basin, 6);
+Map.addLayer(
+  basin.style({color: 'red', fillColor: '00000000', width: 2}),
+  {},
+  'Godavari Basin'
+);
+
+// 2. Dynamic World collection for 2019
+var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filterBounds(geometry)
+  .filterDate('2019-01-01', '2020-01-01');
+
+print('Dynamic World image count, 2019:', dw.size());
+
+// 3. Annual mode composite
+var label = dw.select('label').mode().clip(geometry);
+
+// Original Dynamic World classes mapped to our six classes
+var lulc2019 = label.remap(
+  [0, 1, 2, 3, 4, 5, 6, 7, 8],
+  [0, 1, 5, 0, 2, 5, 3, 4, 4]
+).rename('LULC').toByte();
+
+var classNames = [
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland/wasteland'
+];
+
+var palette = [
+  '419BDF',
+  '397D49',
+  'E6A83D',
+  'C4281B',
+  'B8A58A',
+  '88B053'
+];
+
+Map.addLayer(
+  lulc2019,
+  {min: 0, max: 5, palette: palette},
+  'Godavari LULC 2019'
+);
+
+// 4. Preliminary class-wise area at 100 m
+var areaImage = ee.Image.pixelArea()
+  .divide(10000)
+  .rename('area_ha')
+  .addBands(lulc2019);
+
+var areaStats = areaImage.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'class'
+  }),
+  geometry: geometry,
+  scale: 100,
+  maxPixels: 1e13,
+  tileScale: 8
+});
+
+var groups = ee.List(areaStats.get('groups'));
+
+var areaTable = ee.FeatureCollection(groups.map(function(item) {
+  item = ee.Dictionary(item);
+  var classId = ee.Number(item.get('class')).toInt();
+
+  return ee.Feature(null, {
+    year: 2019,
+    class_id: classId,
+    class_name: ee.List(classNames).get(classId),
+    area_ha: item.get('sum'),
+    area_km2: ee.Number(item.get('sum')).divide(100)
+  });
+}));
+
+print('2019 preliminary area by class:', areaTable);
+print(
+  '2019 total mapped area (km²):',
+  areaTable.aggregate_sum('area_km2')
+);
+
+// 5. Export LULC GeoTIFF at 10 m
+Export.image.toDrive({
+  image: lulc2019,
+  description: 'Godavari_LULC_2019_Map',
+  folder: 'Godavari_LULC',
+  fileNamePrefix: 'Godavari_LULC_2019',
+  region: geometry,
+  scale: 10,
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF'
+});
+
+// 6. Candidate points: target 30 per class
+var samples2019 = lulc2019.stratifiedSample({
+  numPoints: 30,
+  classBand: 'LULC',
+  region: geometry,
+  scale: 100,
+  seed: 2019,
+  geometries: true,
+  tileScale: 8
+}).map(function(feature) {
+  var classId = ee.Number(feature.get('LULC')).toInt();
+
+  return feature.set({
+    year: 2019,
+    class_name: ee.List(classNames).get(classId)
+  });
+});
+
+print('2019 candidate point count:', samples2019.size());
+print(
+  '2019 candidate points by class:',
+  samples2019.aggregate_histogram('LULC')
+);
+
+Map.addLayer(
+  samples2019,
+  {color: 'yellow'},
+  '2019 candidate points'
+);
+
+// 7. Export candidate points CSV
+Export.table.toDrive({
+  collection: samples2019,
+  description: 'Godavari_LULC_2019_Candidate_Points',
+  folder: 'Godavari_LULC',
+  fileNamePrefix: 'Godavari_LULC_2019_Candidate_Points',
+  fileFormat: 'CSV'
+});
