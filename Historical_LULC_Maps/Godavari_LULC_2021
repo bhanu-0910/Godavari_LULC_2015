@@ -179,7 +179,6 @@ validation = validation.map(function(feature) {
 });
 
 print("Validation sample count:", validation.size());
-print("Validation feature:", validation.first());
 print("Validation property names:", validation.first().propertyNames());
 
 // Count sample labels by class.
