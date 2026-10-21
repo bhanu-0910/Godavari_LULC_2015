@@ -206,145 +206,100 @@ print("Kappa (PRELIMINARY):", matrix.kappa());
 ***************************************************************/
 
 
+
 /***************************************************************
- STEP 10 — 2021 REFERENCE LABEL INSPECTION
- Inspect one sample at a time
+ STEP 10 — LOAD REFERENCE DATA FOR ALL 180 SAMPLES
 ***************************************************************/
 
 var samples = ee.FeatureCollection(
   "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
 );
 
-// Select the first existing sample point.
-var sample0 = ee.Feature(samples.first());
-var localArea = sample0.geometry().buffer(1500);
+// ESA WorldCover 2021: independent land-cover product.
+var esa = ee.ImageCollection("ESA/WorldCover/v200")
+  .first()
+  .select("Map")
+  .rename("ESA_class");
 
-// Load Sentinel-2 imagery only around this point.
-var s2Local = ee.ImageCollection(
-  "COPERNICUS/S2_SR_HARMONIZED"
-)
-  .filterBounds(localArea)
-  .filterDate("2021-01-01", "2022-01-01")
-  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 40))
-  .select(["B2", "B3", "B4"]);
-
-print("Local Sentinel-2 scene count:", s2Local.size());
-print("Selected sample properties:", sample0);
-
-// Create a local composite.
-var localComposite = s2Local.median().clip(localArea);
-
-// Center the map on the selected point.
-Map.centerObject(sample0, 14);
-
-// Display imagery and the selected point.
-Map.addLayer(
-  localComposite,
-  {
-    bands: ["B4", "B3", "B2"],
-    min: 0,
-    max: 3000
-  },
-  "Sample 0 RGB"
-);
-
-Map.addLayer(
-  ee.FeatureCollection([sample0]).style({
-    color: "yellow",
-    pointSize: 8
-  }),
-  {},
-  "Selected Sample 0"
-);
-
-print("Total existing samples:", samples.size());
-
-/***************************************************************
- END STEP 10
-***************************************************************/
-// Inspect only Sample 0
-var sample0 = ee.Feature(samples.first());
-
-var pointResult = lulc2021.reduceRegion({
-  reducer: ee.Reducer.first(),
-  geometry: sample0.geometry(),
+// Sample ESA and Dynamic World-derived project classes
+// at each of the existing 180 points.
+var sampled = esa.addBands(
+  lulc2021.rename("predicted_LULC")
+).sampleRegions({
+  collection: samples,
+  properties: ["LULC"],
   scale: 10,
-  maxPixels: 1000
+  geometries: true,
+  tileScale: 4
 });
 
-print("Sample 0 coordinates:", sample0.geometry().coordinates());
-print("Sample 0 existing label:", sample0.get("LULC"));
-print("Sample 0 classified value:", pointResult);
-var sample0 = ee.Feature(samples.first());
-var nearby = sample0.geometry().buffer(15);
-
-var classCounts = lulc2021.reduceRegion({
-  reducer: ee.Reducer.frequencyHistogram(),
-  geometry: nearby,
-  scale: 10,
-  maxPixels: 100
-});
-
-print("Nearby LULC class counts:", classCounts);
-
-var sample0 = ee.Feature(samples.first());
-var localArea = sample0.geometry().buffer(500);
-
-var clearScenes = ee.ImageCollection(
-  "COPERNICUS/S2_SR_HARMONIZED"
-)
-  .filterBounds(localArea)
-  .filterDate("2021-01-01", "2022-01-01")
-  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
-  .sort("CLOUDY_PIXEL_PERCENTAGE");
-
-print("Candidate image dates:",
-  clearScenes.aggregate_array("system:time_start")
-    .map(function(t) {
-      return ee.Date(t).format("YYYY-MM-dd");
-    })
-);
-
-var scene = ee.Image(clearScenes.first());
-
-Map.addLayer(
-  scene,
-  "Sample 0 - Single-date RGB"
-);
-
-Map.centerObject(sample0, 17);
-
-
 /***************************************************************
- STEP 11 — INSPECT SAMPLE 0 FOR REFERENCE LABELLING
+ STEP 11 — CREATE PROVISIONAL REFERENCE-LABEL CANDIDATES
 ***************************************************************/
 
-var sample0 = ee.Feature(samples.first());
+// Map ESA WorldCover classes to the six project classes.
+// -1 = needs review / unsupported mapping.
+var candidates = sampled.map(function(f) {
+  var e = ee.Number(f.get("ESA_class"));
 
-// Show the exact sample location.
-Map.centerObject(sample0, 18);
+  var candidate = ee.Algorithms.If(
+    e.eq(80), 0,  // Water
+    ee.Algorithms.If(
+      e.eq(10), 1,  // Tree cover
+      ee.Algorithms.If(
+        e.eq(40), 2,  // Cropland
+        ee.Algorithms.If(
+          e.eq(50), 3,  // Built-up
+          ee.Algorithms.If(
+            e.eq(60), 4,  // Bare / sparse vegetation
+            ee.Algorithms.If(
+              e.eq(30).or(e.eq(20)).or(e.eq(90))
+                .or(e.eq(95)).or(e.eq(100)),
+              5,  // Grass, shrub, wetland, mangrove, moss/lichen
+              -1
+            )
+          )
+        )
+      )
+    )
+  );
 
-Map.addLayer(
-  ee.FeatureCollection([sample0]).style({
-    color: "yellow",
-    pointSize: 10,
-    width: 2
-  }),
-  {},
-  "Sample 0 - Inspect Here"
-);
+  return f.set({
+    "reference_candidate": candidate,
+    "final_reference": -1,
+    "verification_status": "Pending independent verification"
+  });
+});
 
-// Print coordinates and current label.
-print("Sample 0 coordinates:", sample0.geometry().coordinates());
-print("Existing label (not yet verified):", sample0.get("LULC"));
-
-// Show Sentinel-2 RGB imagery around the point.
-Map.addLayer(
-  localComposite,
-  {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
-  "Sample 0 RGB for Inspection"
+print("Existing samples:", samples.size());
+print("Candidate records:", candidates.size());
+print("Example candidate:", candidates.first());
+print(
+  "Candidate class counts:",
+  candidates.aggregate_histogram("reference_candidate")
 );
 
 /***************************************************************
- END STEP 11
+ STEP 12 — EXPORT CANDIDATES FOR REVIEW
+***************************************************************/
+
+Export.table.toDrive({
+  collection: candidates,
+  description: "Godavari_2021_Reference_Candidates",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2021_Reference_Candidates",
+  fileFormat: "CSV",
+  selectors: [
+    "LULC",
+    "ESA_class",
+    "predicted_LULC",
+    "reference_candidate",
+    "final_reference",
+    "verification_status",
+    ".geo"
+  ]
+});
+
+/***************************************************************
+ END STEP 10–12
 ***************************************************************/
