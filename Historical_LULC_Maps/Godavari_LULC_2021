@@ -178,8 +178,8 @@ validation = validation.map(function(feature) {
   return feature.set("reference", feature.get("LULC"));
 });
 
-print("Validation sample count:", validation.size());
-print("Validation property names:", validation.first().propertyNames());
+//print("Validation sample count:", validation.size());
+//print("Validation property names:", validation.first().propertyNames());
 
 // Count sample labels by class.
 var referenceCounts = validation.aggregate_histogram("reference");
@@ -309,7 +309,6 @@ var scene = ee.Image(clearScenes.first());
 
 Map.addLayer(
   scene,
-  {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
   "Sample 0 - Single-date RGB"
 );
 
