@@ -159,3 +159,44 @@ Export.image.toDrive({
 // ============================================================
 // END
 // ============================================================
+
+/* ============================================================
+   ACCURACY ASSESSMENT — GODAVARI LULC 2016
+   STEP 1: GENERATE CANDIDATE REFERENCE POINTS
+   ============================================================ */
+
+// Use the existing lulc2016 and basin variables.
+
+// Generate 30 candidate points per mapped class.
+// These are NOT yet verified reference labels.
+
+var samples2016 = lulc2016.stratifiedSample({
+  numPoints: 30,
+  classBand: "LULC",
+  region: basin.geometry(),
+  scale: 10,
+  seed: 2016,
+  geometries: true,
+  dropNulls: true,
+  tileScale: 4
+});
+
+print("2016 candidate sample count:", samples2016.size());
+print("2016 candidate points:", samples2016.limit(10));
+
+Map.addLayer(
+  samples2016,
+  {color: "yellow"},
+  "2016 Candidate Accuracy Points"
+);
+
+// Export the point locations and mapped class.
+// Reference labels must be checked independently later.
+
+Export.table.toDrive({
+  collection: samples2016,
+  description: "Godavari_LULC_2016_Candidate_Points",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2016_Candidate_Points",
+  fileFormat: "CSV"
+});
