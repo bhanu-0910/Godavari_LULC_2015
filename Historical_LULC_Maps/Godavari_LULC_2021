@@ -263,3 +263,12 @@ print("Total existing samples:", samples.size());
 /***************************************************************
  END STEP 10
 ***************************************************************/
+print("Sample 0 coordinates:", sample0.geometry().coordinates());
+print("Sample 0 existing LULC label:", sample0.get("LULC"));
+print("Sample 0 classified map value:",
+  lulc2021.sample({
+    region: sample0.geometry(),
+    scale: 10,
+    numPixels: 1
+  })
+);
