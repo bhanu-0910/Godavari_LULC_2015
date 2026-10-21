@@ -303,3 +303,49 @@ Export.table.toDrive({
 /***************************************************************
  END STEP 10–12
 ***************************************************************/
+
+var samples = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
+);
+
+var esa = ee.ImageCollection("ESA/WorldCover/v200")
+  .first()
+  .select("Map")
+  .rename("ESA_class");
+
+var comparison = esa.addBands(
+  lulc2021.rename("predicted_LULC")
+).sampleRegions({
+  collection: samples,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+}).map(function(f) {
+  var e = ee.Number(f.get("ESA_class"));
+
+  var candidate = ee.Number(ee.Algorithms.If(
+    e.eq(80), 0,
+    ee.Algorithms.If(e.eq(10), 1,
+    ee.Algorithms.If(e.eq(40), 2,
+    ee.Algorithms.If(e.eq(50), 3,
+    ee.Algorithms.If(e.eq(60), 4,
+    ee.Algorithms.If(
+      e.eq(20).or(e.eq(30)).or(e.eq(90))
+       .or(e.eq(95)).or(e.eq(100)), 5, -1
+    )))))
+  ));
+
+  var predicted = ee.Number(f.get("predicted_LULC"));
+
+  return f.set({
+    reference_candidate: candidate,
+    needs_review: candidate.neq(predicted)
+  });
+});
+
+print("Total samples", comparison.size());
+print("Samples needing review",
+  comparison.filter(ee.Filter.eq("needs_review", true)).size());
+print("Candidate vs prediction counts",
+  comparison.aggregate_histogram("reference_candidate"));
