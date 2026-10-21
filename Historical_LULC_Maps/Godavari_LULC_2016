@@ -170,15 +170,19 @@ Export.image.toDrive({
 // Generate 30 candidate points per mapped class.
 // These are NOT yet verified reference labels.
 
+
+/* ACCURACY ASSESSMENT — 2016
+   Faster candidate point generation */
+
 var samples2016 = lulc2016.stratifiedSample({
   numPoints: 30,
   classBand: "LULC",
   region: basin.geometry(),
-  scale: 10,
+  scale: 100,
   seed: 2016,
   geometries: true,
   dropNulls: true,
-  tileScale: 4
+  tileScale: 8
 });
 
 print("2016 candidate sample count:", samples2016.size());
@@ -189,9 +193,6 @@ Map.addLayer(
   {color: "yellow"},
   "2016 Candidate Accuracy Points"
 );
-
-// Export the point locations and mapped class.
-// Reference labels must be checked independently later.
 
 Export.table.toDrive({
   collection: samples2016,
