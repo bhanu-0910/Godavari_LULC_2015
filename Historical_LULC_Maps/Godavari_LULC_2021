@@ -415,3 +415,18 @@ Map.centerObject(reviewComparison, 9);
 
 print("Review points:", reviewComparison.size());
 
+Export.table.toDrive({
+  collection: reviewComparison,
+  description: "Godavari_2021_64_Review_Points",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2021_64_Review_Points",
+  fileFormat: "CSV",
+  selectors: [
+    "LULC",
+    "Map",
+    "predicted_LULC",
+    "needs_review",
+    ".geo"
+  ]
+});
+
