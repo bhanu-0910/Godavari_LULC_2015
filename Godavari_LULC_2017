@@ -206,3 +206,120 @@ Export.table.toDrive({
 // ============================================================
 // END — GODAVARI LULC 2017
 // ============================================================
+ 
+/* ============================================================
+   GODAVARI LULC 2017 — REFERENCE EVIDENCE
+   ============================================================ */
+
+// 1. ESA WORLDCOVER 2021 CANDIDATE LABELS
+// These are later-year comparison labels, not 2017 ground truth.
+
+var esa2021 = ee.ImageCollection("ESA/WorldCover/v200")
+  .first()
+  .select("Map")
+  .clip(basin);
+
+var esaCandidate2017 = esa2021.remap(
+  [10, 20, 30, 40, 50, 60, 80, 90, 95, 100],
+  [ 1,  5,  5,  2,  3,  4,  0,  5,  5,   5],
+  -1
+).rename("ESA_candidate");
+
+
+// 2. LOAD SENTINEL-2 2017 IMAGERY
+
+var s2_2017 = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterBounds(basin)
+  .filterDate("2017-01-01", "2018-01-01")
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+  .select(["B2", "B3", "B4", "B8"]);
+
+print("2017 Sentinel-2 image count:", s2_2017.size());
+
+var s2Median2017 = s2_2017.median().clip(basin);
+
+var ndvi2017 = s2Median2017.normalizedDifference(
+  ["B8", "B4"]
+).rename("NDVI");
+
+var ndwi2017 = s2Median2017.normalizedDifference(
+  ["B3", "B8"]
+).rename("NDWI");
+
+
+// 3. EXTRACT EVIDENCE AT CANDIDATE POINTS
+
+var evidenceImage2017 = lulc2017.rename("Predicted")
+  .addBands(esaCandidate2017)
+  .addBands(s2Median2017)
+  .addBands(ndvi2017)
+  .addBands(ndwi2017);
+
+var evidence2017 = evidenceImage2017.sampleRegions({
+  collection: samples2017,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+
+// 4. FLAG DISAGREEMENTS
+
+var flagged2017 = evidence2017.map(function(feature) {
+  var predicted = ee.Number(feature.get("Predicted"));
+  var esa = ee.Number(feature.get("ESA_candidate"));
+
+  var needsReview = esa.gte(0).and(esa.neq(predicted));
+
+  return feature.set({
+    "Year": 2017,
+    "needs_review": needsReview,
+    "review_status": ee.Algorithms.If(
+      esa.lt(0),
+      "Needs reference",
+      ee.Algorithms.If(
+        needsReview,
+        "Flagged for review",
+        "Candidate agreement - not verified"
+      )
+    )
+  });
+});
+
+print("2017 evidence rows:", flagged2017.size());
+
+print(
+  "2017 points flagged for review:",
+  flagged2017.filter(
+    ee.Filter.eq("needs_review", true)
+  ).size()
+);
+
+
+// 5. EXPORT ALL EVIDENCE
+
+Export.table.toDrive({
+  collection: flagged2017,
+  description: "Godavari_2017_All180_Evidence_Combined",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2017_All180_Evidence_Combined",
+  fileFormat: "CSV"
+});
+
+
+// 6. EXPORT PRIORITY REVIEW POINTS
+
+Export.table.toDrive({
+  collection: flagged2017.filter(
+    ee.Filter.eq("needs_review", true)
+  ),
+  description: "Godavari_2017_Priority_Review",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2017_Priority_Review",
+  fileFormat: "CSV"
+});
+
+// ============================================================
+// END 2017 REFERENCE EVIDENCE
+// ============================================================
