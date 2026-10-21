@@ -1,0 +1,208 @@
+
+/* ============================================================
+   GODAVARI BASIN - LULC 2017
+   Dynamic World | Six Project Classes
+   ============================================================ */
+
+// 1. LOAD GODAVARI BASIN
+
+var basin = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+);
+
+Map.centerObject(basin, 7);
+
+Map.addLayer(
+  basin.style({
+    color: "red",
+    fillColor: "00000000",
+    width: 2
+  }),
+  {},
+  "Godavari Basin"
+);
+
+print(
+  "Godavari basin area (km²):",
+  basin.geometry().area(1000).divide(1e6)
+);
+
+
+// 2. LOAD DYNAMIC WORLD 2017
+
+var dwCollection2017 = ee.ImageCollection(
+  "GOOGLE/DYNAMICWORLD/V1"
+)
+  .filterBounds(basin)
+  .filterDate("2017-01-01", "2018-01-01");
+
+print(
+  "2017 Dynamic World image count:",
+  dwCollection2017.size()
+);
+
+var dw2017 = dwCollection2017
+  .select("label")
+  .mode()
+  .clip(basin);
+
+print("Dynamic World 2017:", dw2017);
+
+
+// 3. DISPLAY ORIGINAL DYNAMIC WORLD
+
+var dwPalette = [
+  "419BDF", // Water
+  "397D49", // Trees
+  "88B053", // Grass
+  "7A87C6", // Flooded vegetation
+  "E49635", // Crops
+  "DFC35A", // Shrub
+  "C4281B", // Built
+  "A59B8F", // Bare
+  "B39FE1"  // Snow/Ice
+];
+
+Map.addLayer(
+  dw2017,
+  {
+    min: 0,
+    max: 8,
+    palette: dwPalette
+  },
+  "Dynamic World 2017"
+);
+
+
+// 4. CONVERT TO SIX PROJECT CLASSES
+// 0 = Water
+// 1 = Forest
+// 2 = Agriculture
+// 3 = Built-up
+// 4 = Barren
+// 5 = Grassland/Wasteland
+
+var lulc2017 = dw2017
+  .remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  )
+  .rename("LULC")
+  .toByte()
+  .clip(basin);
+
+
+// 5. DISPLAY SIX-CLASS LULC
+
+var lulcPalette = [
+  "419BDF", // Water
+  "397D49", // Forest
+  "E49635", // Agriculture
+  "C4281B", // Built-up
+  "A59B8F", // Barren
+  "88B053"  // Grassland/Wasteland
+];
+
+Map.addLayer(
+  lulc2017,
+  {
+    min: 0,
+    max: 5,
+    palette: lulcPalette
+  },
+  "Godavari LULC 2017"
+);
+
+
+// 6. PRELIMINARY CLASS AREA CALCULATION
+// 100 m scale for preliminary estimates.
+// Keep this method consistent across years.
+
+var areaImage2017 = ee.Image.pixelArea()
+  .divide(10000)
+  .rename("area_ha")
+  .addBands(lulc2017.rename("class"));
+
+var area2017 = areaImage2017.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: "class"
+  }),
+  geometry: basin.geometry(),
+  scale: 100,
+  maxPixels: 1e13,
+  tileScale: 4
+});
+
+print(
+  "2017 LULC area (hectares, preliminary):",
+  area2017
+);
+
+print(
+  "Class codes:",
+  "0 Water | 1 Forest | 2 Agriculture | " +
+  "3 Built-up | 4 Barren | 5 Grassland/Wasteland"
+);
+
+
+// 7. EXPORT 2017 LULC MAP
+// Export resolution remains 10 m.
+
+Export.image.toDrive({
+  image: lulc2017,
+  description: "Godavari_LULC_2017",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2017",
+  region: basin.geometry(),
+  scale: 10,
+  maxPixels: 1e13
+});
+
+
+// 8. GENERATE 180 CANDIDATE ACCURACY POINTS
+// Target: 30 points per mapped class.
+// These are candidate points, not verified reference labels.
+
+var samples2017 = lulc2017.stratifiedSample({
+  numPoints: 30,
+  classBand: "LULC",
+  region: basin.geometry(),
+  scale: 100,
+  seed: 2017,
+  geometries: true,
+  dropNulls: true,
+  tileScale: 8
+});
+
+print(
+  "2017 candidate sample count:",
+  samples2017.size()
+);
+
+print(
+  "2017 candidate points:",
+  samples2017.limit(10)
+);
+
+Map.addLayer(
+  samples2017,
+  {color: "yellow"},
+  "2017 Candidate Accuracy Points"
+);
+
+
+// 9. EXPORT CANDIDATE POINTS AS CSV
+
+Export.table.toDrive({
+  collection: samples2017,
+  description: "Godavari_LULC_2017_Candidate_Points",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2017_Candidate_Points",
+  fileFormat: "CSV"
+});
+
+
+// ============================================================
+// END — GODAVARI LULC 2017
+// ============================================================
