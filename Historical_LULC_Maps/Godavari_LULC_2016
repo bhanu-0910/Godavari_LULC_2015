@@ -201,3 +201,123 @@ Export.table.toDrive({
   fileNamePrefix: "Godavari_LULC_2016_Candidate_Points",
   fileFormat: "CSV"
 });
+
+/* ============================================================
+   GODAVARI LULC 2016 — REFERENCE EVIDENCE
+   Same workflow as 2021
+   ============================================================ */
+
+// 1. LOAD ESA WORLDCOVER 2021
+// This is a candidate comparison layer, NOT 2016 ground truth.
+
+var esa2021 = ee.ImageCollection("ESA/WorldCover/v200")
+  .first()
+  .select("Map")
+  .clip(basin);
+
+// Convert ESA classes to project classes:
+// 0 Water, 1 Forest, 2 Agriculture,
+// 3 Built-up, 4 Barren, 5 Grassland/Wasteland
+
+var esaCandidate2016 = esa2021.remap(
+  [10, 20, 30, 40, 50, 60, 80, 90, 95, 100],
+  [ 1,  5,  5,  2,  3,  4,  0,  5,  5,   5],
+  -1
+).rename("ESA_candidate");
+
+// 2. LOAD 2016 SENTINEL-2 IMAGERY
+// Use TOA imagery because Sentinel-2 SR Harmonized
+// does not cover the full 2016 calendar year.
+
+var s2_2016 = ee.ImageCollection("COPERNICUS/S2_HARMONIZED")
+  .filterBounds(basin)
+  .filterDate("2016-01-01", "2017-01-01")
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30))
+  .select(["B2", "B3", "B4", "B8"]);
+
+print("2016 Sentinel-2 image count:", s2_2016.size());
+
+var s2Median2016 = s2_2016.median().clip(basin);
+
+var ndvi2016 = s2Median2016.normalizedDifference(
+  ["B8", "B4"]
+).rename("NDVI");
+
+var ndwi2016 = s2Median2016.normalizedDifference(
+  ["B3", "B8"]
+).rename("NDWI");
+
+// 3. COMBINE MAP, ESA CANDIDATE AND SATELLITE EVIDENCE
+
+var evidenceImage2016 = lulc2016.rename("Predicted")
+  .addBands(esaCandidate2016)
+  .addBands(s2Median2016)
+  .addBands(ndvi2016)
+  .addBands(ndwi2016);
+
+// Sample evidence at the 180 candidate points.
+var evidence2016 = evidenceImage2016.sampleRegions({
+  collection: samples2016,
+  properties: ["LULC"],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+// 4. FLAG POINTS THAT DISAGREE WITH ESA CANDIDATE
+
+var flagged2016 = evidence2016.map(function(feature) {
+  var predicted = ee.Number(feature.get("Predicted"));
+  var esa = ee.Number(feature.get("ESA_candidate"));
+
+  var needsReview = esa.gte(0)
+    .and(esa.neq(predicted));
+
+  return feature.set({
+    "Year": 2016,
+    "needs_review": needsReview,
+    "review_status": ee.Algorithms.If(
+      esa.lt(0),
+      "Needs reference",
+      ee.Algorithms.If(
+        needsReview,
+        "Flagged for review",
+        "Candidate agreement - not verified"
+      )
+    )
+  });
+});
+
+print("2016 evidence rows:", flagged2016.size());
+print(
+  "2016 points flagged for review:",
+  flagged2016.filter(
+    ee.Filter.eq("needs_review", true)
+  ).size()
+);
+
+// 5. EXPORT ALL POINTS WITH EVIDENCE
+
+Export.table.toDrive({
+  collection: flagged2016,
+  description: "Godavari_2016_All180_Evidence_Combined",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2016_All180_Evidence_Combined",
+  fileFormat: "CSV"
+});
+
+// 6. EXPORT FLAGGED POINTS SEPARATELY
+
+Export.table.toDrive({
+  collection: flagged2016.filter(
+    ee.Filter.eq("needs_review", true)
+  ),
+  description: "Godavari_2016_Priority_Review",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2016_Priority_Review",
+  fileFormat: "CSV"
+});
+
+// ============================================================
+// END 2016 EVIDENCE SECTION
+// ============================================================
