@@ -275,3 +275,77 @@ var pointResult = lulc2021.reduceRegion({
 print("Sample 0 coordinates:", sample0.geometry().coordinates());
 print("Sample 0 existing label:", sample0.get("LULC"));
 print("Sample 0 classified value:", pointResult);
+var sample0 = ee.Feature(samples.first());
+var nearby = sample0.geometry().buffer(15);
+
+var classCounts = lulc2021.reduceRegion({
+  reducer: ee.Reducer.frequencyHistogram(),
+  geometry: nearby,
+  scale: 10,
+  maxPixels: 100
+});
+
+print("Nearby LULC class counts:", classCounts);
+
+var sample0 = ee.Feature(samples.first());
+var localArea = sample0.geometry().buffer(500);
+
+var clearScenes = ee.ImageCollection(
+  "COPERNICUS/S2_SR_HARMONIZED"
+)
+  .filterBounds(localArea)
+  .filterDate("2021-01-01", "2022-01-01")
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 20))
+  .sort("CLOUDY_PIXEL_PERCENTAGE");
+
+print("Candidate image dates:",
+  clearScenes.aggregate_array("system:time_start")
+    .map(function(t) {
+      return ee.Date(t).format("YYYY-MM-dd");
+    })
+);
+
+var scene = ee.Image(clearScenes.first());
+
+Map.addLayer(
+  scene,
+  {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
+  "Sample 0 - Single-date RGB"
+);
+
+Map.centerObject(sample0, 17);
+
+
+/***************************************************************
+ STEP 11 — INSPECT SAMPLE 0 FOR REFERENCE LABELLING
+***************************************************************/
+
+var sample0 = ee.Feature(samples.first());
+
+// Show the exact sample location.
+Map.centerObject(sample0, 18);
+
+Map.addLayer(
+  ee.FeatureCollection([sample0]).style({
+    color: "yellow",
+    pointSize: 10,
+    width: 2
+  }),
+  {},
+  "Sample 0 - Inspect Here"
+);
+
+// Print coordinates and current label.
+print("Sample 0 coordinates:", sample0.geometry().coordinates());
+print("Existing label (not yet verified):", sample0.get("LULC"));
+
+// Show Sentinel-2 RGB imagery around the point.
+Map.addLayer(
+  localComposite,
+  {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
+  "Sample 0 RGB for Inspection"
+);
+
+/***************************************************************
+ END STEP 11
+***************************************************************/
