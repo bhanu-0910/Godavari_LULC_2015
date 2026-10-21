@@ -157,3 +157,118 @@ Export.table.toDrive({
   fileNamePrefix: 'Godavari_LULC_2018_Candidate_Points',
   fileFormat: 'CSV'
 });
+
+/************************************************************
+ GODAVARI BASIN — 2018 EVIDENCE EXTRACTION
+ Requires existing variables:
+ basin, geometry, lulc2018, samples2018
+************************************************************/
+
+// 1. ESA WorldCover 2021 candidate reference
+// NOTE: This is a screening layer, NOT 2018 ground truth.
+
+var esa = ee.ImageCollection('ESA/WorldCover/v200')
+  .first()
+  .select('Map')
+  .clip(geometry);
+
+// ESA classes mapped to our six classes:
+// 10 tree cover -> 1 forest
+// 20 shrubland, 30 grassland -> 5 grassland/wasteland
+// 40 cropland -> 2 agriculture
+// 50 built-up -> 3 built-up
+// 60 bare/sparse -> 4 barren
+// 80 water -> 0 water
+// 90 herbaceous wetland, 95 mangroves, 100 moss/lichen -> 5
+// Other classes are marked -1 for exclusion from comparison.
+
+var esaCandidate = esa.remap(
+  [10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100],
+  [ 1,  5,  5,  2,  3,  4, -1,  0,  5,  5,   5],
+  -1
+).rename('ESA_candidate').toInt16();
+
+// 2. Sentinel-2 surface reflectance evidence for 2018
+
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(geometry)
+  .filterDate('2018-01-01', '2019-01-01')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30));
+
+print('2018 Sentinel-2 image count:', s2.size());
+
+var s2Composite = s2
+  .select(['B2', 'B3', 'B4', 'B8'])
+  .median()
+  .clip(geometry);
+
+var ndvi = s2Composite.normalizedDifference(['B8', 'B4'])
+  .rename('NDVI');
+
+var ndwi = s2Composite.normalizedDifference(['B3', 'B8'])
+  .rename('NDWI');
+
+var evidenceImage = lulc2018.rename('Predicted')
+  .addBands(esaCandidate)
+  .addBands(s2Composite)
+  .addBands(ndvi)
+  .addBands(ndwi);
+
+// 3. Extract evidence at all 180 candidate points
+
+var evidence2018 = evidenceImage.sampleRegions({
+  collection: samples2018,
+  properties: ['LULC', 'class_name', 'year'],
+  scale: 10,
+  geometries: true,
+  tileScale: 8
+}).map(function(feature) {
+  var predicted = ee.Number(feature.get('Predicted'));
+  var esaClass = ee.Number(feature.get('ESA_candidate'));
+
+  var validESA = esaClass.gte(0);
+  var disagreement = esaClass.neq(predicted);
+
+  var needsReview = validESA.and(disagreement);
+
+  return feature.set({
+    ESA_valid: validESA,
+    ESA_matches_DW: validESA.and(esaClass.eq(predicted)),
+    needs_review: needsReview,
+    review_status: ee.Algorithms.If(
+      needsReview,
+      'Review',
+      ee.Algorithms.If(validESA, 'Candidate agreement', 'ESA unavailable')
+    )
+  });
+});
+
+print('2018 evidence point count:', evidence2018.size());
+print(
+  '2018 review categories:',
+  evidence2018.aggregate_histogram('review_status')
+);
+
+// 4. Export complete evidence table
+
+Export.table.toDrive({
+  collection: evidence2018,
+  description: 'Godavari_2018_All180_Evidence_Combined',
+  folder: 'Godavari_LULC',
+  fileNamePrefix: 'Godavari_2018_All180_Evidence_Combined',
+  fileFormat: 'CSV'
+});
+
+// 5. Export priority-review points
+
+var priority2018 = evidence2018.filter(
+  ee.Filter.eq('needs_review', true)
+);
+
+Export.table.toDrive({
+  collection: priority2018,
+  description: 'Godavari_2018_Priority_Review',
+  folder: 'Godavari_LULC',
+  fileNamePrefix: 'Godavari_2018_Priority_Review',
+  fileFormat: 'CSV'
+});
