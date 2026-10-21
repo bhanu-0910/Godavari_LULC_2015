@@ -353,3 +353,16 @@ print("Samples needing review",
   comparison.filter(ee.Filter.eq("needs_review", true)).size());
 print("Candidate vs prediction counts",
   comparison.aggregate_histogram("reference_candidate"));
+  var needsReview = comparison.filter(
+  ee.Filter.eq("needs_review", 1)
+);
+
+print("Correct review count:", needsReview.size());
+
+Export.table.toDrive({
+  collection: needsReview,
+  description: "Godavari_2021_Samples_Needing_Review",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_2021_Samples_Needing_Review",
+  fileFormat: "CSV"
+});
