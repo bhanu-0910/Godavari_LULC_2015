@@ -26,14 +26,21 @@ Map.addLayer(
 
 // 2. LOAD DYNAMIC WORLD 2016
 
-var dw2016 = ee.ImageCollection(
+var dwCollection2016 = ee.ImageCollection(
   "GOOGLE/DYNAMICWORLD/V1"
 )
   .filterBounds(basin)
-  .filterDate("2016-01-01", "2017-01-01")
+  .filterDate("2016-01-01", "2017-01-01");
+
+print("2016 Dynamic World image count:",
+      dwCollection2016.size());
+
+var dw2016 = dwCollection2016
   .select("label")
   .mode()
   .clip(basin);
+
+print("Dynamic World 2016:", dw2016);
 
 
 // 3. PRINT INFORMATION
@@ -113,34 +120,39 @@ Map.addLayer(
 
 // 7. CALCULATE AREA
 
+// 7. CALCULATE AREA — 10 m scale
+
 var areaImage = ee.Image.pixelArea()
   .divide(10000)
-  .addBands(lulc2016);
+  .rename("area_ha")
+  .addBands(lulc2016.rename("class"));
 
 var area2016 = areaImage.reduceRegion({
-
-  reducer: ee.Reducer.sum()
-    .group({
-      groupField: 1,
-      groupName: "class"
-    }),
-
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: "class"
+  }),
   geometry: basin.geometry(),
-
-  scale: 100,
-
-  bestEffort: true,
-
+  scale: 10,
   maxPixels: 1e13,
-
   tileScale: 4
 });
 
-print(
-  "2016 LULC Area (hectares):",
-  area2016
-);
+print("2016 LULC area (hectares):", area2016);
 
+var classifiedArea = ee.Image.pixelArea()
+  .updateMask(lulc2016.mask())
+  .divide(1e6)
+  .rename("area_km2")
+  .reduceRegion({
+    reducer: ee.Reducer.sum(),
+    geometry: basin.geometry(),
+    scale: 10,
+    maxPixels: 1e13,
+    tileScale: 4
+  });
+
+print("2016 total classified area (km²):", classifiedArea);
 
 // 8. CLASS INFORMATION
 
