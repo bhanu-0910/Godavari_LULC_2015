@@ -340,9 +340,13 @@ var comparison = esa.addBands(
 
   return f.set({
     reference_candidate: candidate,
-    needs_review: candidate.neq(predicted)
+    needs_review: ee.Number(candidate).neq(predicted)
   });
 });
+print("Review status counts:",
+  comparison.aggregate_histogram("needs_review"));
+
+print("First comparison record:", comparison.first());
 
 print("Total samples", comparison.size());
 print("Samples needing review",
