@@ -205,3 +205,71 @@ print("Kappa (PRELIMINARY):", matrix.kappa());
 /***************************************************************
  END STEP 9
 ***************************************************************/
+
+/***************************************************************
+ STEP 10 — 2021 REFERENCE LABEL INSPECTION
+ Sentinel-2 imagery + existing sample points
+***************************************************************/
+
+var samples = ee.FeatureCollection(
+  "projects/fine-slice-478618-n5/assets/Godavari_LULC_2021_Samples"
+);
+
+// Sentinel-2 surface reflectance imagery for 2021.
+var s2 = ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+  .filterBounds(basin)
+  .filterDate("2021-01-01", "2022-01-01")
+  .filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", 30));
+
+print("Sentinel-2 scenes available in 2021:", s2.size());
+
+// Cloud and cirrus masking using the scene classification band.
+function maskS2(image) {
+  var scl = image.select("SCL");
+  var clear = scl.neq(3)  // Cloud shadow
+    .and(scl.neq(8))      // Medium-probability cloud
+    .and(scl.neq(9))      // High-probability cloud
+    .and(scl.neq(10))     // Cirrus
+    .and(scl.neq(11));    // Snow/ice
+
+  return image.updateMask(clear)
+    .select(["B2", "B3", "B4", "B8"])
+    .copyProperties(image, ["system:time_start"]);
+}
+
+// Median composite: useful for overview, but inspect dates
+// and seasonal changes when deciding reference labels.
+var s2Composite = s2
+  .map(maskS2)
+  .median()
+  .clip(basin);
+
+Map.addLayer(
+  s2Composite,
+  {bands: ["B4", "B3", "B2"], min: 0, max: 3000},
+  "2021 Sentinel-2 RGB"
+);
+
+Map.addLayer(
+  s2Composite,
+  {bands: ["B8", "B4", "B3"], min: 0, max: 4000},
+  "2021 Sentinel-2 False Colour",
+  false
+);
+
+// Show sample points on top of imagery.
+Map.addLayer(
+  samples,
+  {color: "yellow"},
+  "2021 Reference Samples"
+);
+
+print("Sample count:", samples.size());
+print("Sample properties:", samples.first());
+
+// Preserve the existing LULC labels.
+// Do not overwrite them before independently checking imagery.
+
+/***************************************************************
+ END STEP 10
+***************************************************************/
