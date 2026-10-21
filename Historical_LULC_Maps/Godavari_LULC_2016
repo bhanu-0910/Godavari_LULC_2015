@@ -1,9 +1,8 @@
-// ============================================================
-// GODAVARI BASIN - LULC 2016
-// Dynamic World
-// Training will be done later
-// ============================================================
 
+/* ============================================================
+   GODAVARI BASIN - LULC 2016
+   Dynamic World | Six Project Classes
+   ============================================================ */
 
 // 1. LOAD GODAVARI BASIN
 
@@ -23,6 +22,11 @@ Map.addLayer(
   "Godavari Basin"
 );
 
+print(
+  "Godavari basin area (km²):",
+  basin.geometry().area(1000).divide(1e6)
+);
+
 
 // 2. LOAD DYNAMIC WORLD 2016
 
@@ -32,8 +36,10 @@ var dwCollection2016 = ee.ImageCollection(
   .filterBounds(basin)
   .filterDate("2016-01-01", "2017-01-01");
 
-print("2016 Dynamic World image count:",
-      dwCollection2016.size());
+print(
+  "2016 Dynamic World image count:",
+  dwCollection2016.size()
+);
 
 var dw2016 = dwCollection2016
   .select("label")
@@ -43,12 +49,7 @@ var dw2016 = dwCollection2016
 print("Dynamic World 2016:", dw2016);
 
 
-// 3. PRINT INFORMATION
-
-print("Dynamic World 2016:", dw2016);
-
-
-// 4. DISPLAY ORIGINAL DYNAMIC WORLD
+// 3. DISPLAY ORIGINAL DYNAMIC WORLD
 
 var dwPalette = [
   "419BDF", // Water
@@ -73,8 +74,7 @@ Map.addLayer(
 );
 
 
-// 5. CONVERT TO OUR 6 PROJECT CLASSES
-
+// 4. CONVERT TO SIX PROJECT CLASSES
 // 0 = Water
 // 1 = Forest
 // 2 = Agriculture
@@ -82,21 +82,17 @@ Map.addLayer(
 // 4 = Barren
 // 5 = Grassland/Wasteland
 
-var lulc2016 = ee.Image(0)
-  .where(dw2016.eq(0), 0)  // Water
-  .where(dw2016.eq(1), 1)  // Trees → Forest
-  .where(dw2016.eq(2), 5)  // Grass → Grassland
-  .where(dw2016.eq(3), 0)  // Flooded vegetation → Water
-  .where(dw2016.eq(4), 2)  // Crops → Agriculture
-  .where(dw2016.eq(5), 5)  // Shrub → Grassland
-  .where(dw2016.eq(6), 3)  // Built → Built-up
-  .where(dw2016.eq(7), 4)  // Bare → Barren
-  .where(dw2016.eq(8), 4)  // Snow/Ice → Barren
+var lulc2016 = dw2016
+  .remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  )
   .rename("LULC")
+  .toByte()
   .clip(basin);
 
 
-// 6. DISPLAY 6-CLASS LULC
+// 5. DISPLAY SIX-CLASS LULC
 
 var lulcPalette = [
   "419BDF", // Water
@@ -118,9 +114,9 @@ Map.addLayer(
 );
 
 
-// 7. CALCULATE AREA
-
-// 7. CALCULATE AREA — 10 m scale
+// 6. PRELIMINARY CLASS AREA CALCULATION
+// Use 100 m scale to reduce computation time.
+// These are preliminary estimates, not final statistics.
 
 var areaImage = ee.Image.pixelArea()
   .divide(10000)
@@ -133,56 +129,32 @@ var area2016 = areaImage.reduceRegion({
     groupName: "class"
   }),
   geometry: basin.geometry(),
-  scale: 10,
+  scale: 100,
   maxPixels: 1e13,
   tileScale: 4
 });
 
-print("2016 LULC area (hectares):", area2016);
-
-var classifiedArea = ee.Image.pixelArea()
-  .updateMask(lulc2016.mask())
-  .divide(1e6)
-  .rename("area_km2")
-  .reduceRegion({
-    reducer: ee.Reducer.sum(),
-    geometry: basin.geometry(),
-    scale: 10,
-    maxPixels: 1e13,
-    tileScale: 4
-  });
-
-print("2016 total classified area (km²):", classifiedArea);
-
-// 8. CLASS INFORMATION
+print("2016 LULC area (hectares, preliminary):", area2016);
 
 print(
-  "Classes:",
+  "Class codes:",
   "0 Water | 1 Forest | 2 Agriculture | " +
   "3 Built-up | 4 Barren | 5 Grassland/Wasteland"
 );
 
 
-// 9. EXPORT 2016 LULC
+// 7. EXPORT 2016 LULC
+// Keep the export at 10 m.
 
 Export.image.toDrive({
-
-  image: lulc2016.toByte(),
-
+  image: lulc2016,
   description: "Godavari_LULC_2016",
-
   folder: "Godavari_LULC",
-
   fileNamePrefix: "Godavari_LULC_2016",
-
   region: basin.geometry(),
-
   scale: 10,
-
   maxPixels: 1e13
-
 });
-
 
 // ============================================================
 // END
