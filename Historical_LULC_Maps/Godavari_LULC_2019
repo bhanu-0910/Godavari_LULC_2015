@@ -1,178 +1,119 @@
-// ============================================================
-// GODAVARI BASIN - LULC 2019
-// Dynamic World
-// Training will be done later
-// ============================================================
 
+// ======================================================
+// GODAVARI BASIN - 2019 LULC EVIDENCE EXTRACTION
+// ======================================================
 
 // 1. LOAD GODAVARI BASIN
-
 var basin = ee.FeatureCollection(
-  "projects/fine-slice-478618-n5/assets/Godavari_Basin"
+  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
 );
 
 Map.centerObject(basin, 7);
+Map.addLayer(basin, {}, 'Godavari Basin');
 
-Map.addLayer(
-  basin.style({
-    color: "red",
-    fillColor: "00000000",
-    width: 2
-  }),
-  {},
-  "Godavari Basin"
-);
-
-
-// 2. LOAD DYNAMIC WORLD 2019
-
-var dw2019 = ee.ImageCollection(
-  "GOOGLE/DYNAMICWORLD/V1"
-)
+// 2. DYNAMIC WORLD 2019
+var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
   .filterBounds(basin)
-  .filterDate("2019-01-01", "2020-01-01")
-  .select("label")
-  .mode()
-  .clip(basin);
+  .filterDate('2019-01-01', '2020-01-01')
+  .select('label');
 
+print('Dynamic World 2019 image count:', dw.size());
 
-// 3. PRINT INFORMATION
+// Annual mode composite
+var dwMode = dw.mode().clip(basin);
 
-print("Dynamic World 2019:", dw2019);
+// Original Dynamic World classes:
+// 0 Water, 1 Trees, 2 Grass, 3 Flooded vegetation,
+// 4 Crops, 5 Shrub, 6 Built area, 7 Bare, 8 Snow/Ice
 
+// Project classes:
+// 0 Water, 1 Forest, 2 Agriculture,
+// 3 Built-up, 4 Barren, 5 Grassland/Wasteland
 
-// 4. CONVERT TO OUR 6 PROJECT CLASSES
+var lulc2019 = dwMode.remap(
+  [0, 1, 2, 3, 4, 5, 6, 7, 8],
+  [0, 1, 5, 0, 2, 5, 3, 4, 4]
+).rename('LULC').toByte();
 
-// 0 = Water
-// 1 = Forest
-// 2 = Agriculture
-// 3 = Built-up
-// 4 = Barren
-// 5 = Grassland/Wasteland
+Map.addLayer(lulc2019, {
+  min: 0,
+  max: 5,
+  palette: [
+    '419BDF',
+    '397D49',
+    'E6C35C',
+    'C4281B',
+    'A59B8F',
+    '88B053'
+  ]
+}, 'Godavari LULC 2019');
 
-var lulc2019 = ee.Image(0)
-  .where(dw2019.eq(0), 0)  // Water
-  .where(dw2019.eq(1), 1)  // Trees → Forest
-  .where(dw2019.eq(2), 5)  // Grass → Grassland
-  .where(dw2019.eq(3), 0)  // Flooded vegetation → Water
-  .where(dw2019.eq(4), 2)  // Crops → Agriculture
-  .where(dw2019.eq(5), 5)  // Shrub → Grassland
-  .where(dw2019.eq(6), 3)  // Built → Built-up
-  .where(dw2019.eq(7), 4)  // Bare → Barren
-  .where(dw2019.eq(8), 4)  // Snow/Ice → Barren
-  .rename("LULC")
-  .clip(basin);
-
-
-// 5. DISPLAY 6-CLASS LULC
-
-var lulcPalette = [
-  "419BDF", // Water
-  "397D49", // Forest
-  "E49635", // Agriculture
-  "C4281B", // Built-up
-  "A59B8F", // Barren
-  "88B053"  // Grassland/Wasteland
-];
-
-Map.addLayer(
-  lulc2019,
-  {
-    min: 0,
-    max: 5,
-    palette: lulcPalette
-  },
-  "Godavari LULC 2019"
-);
-
-
-// 6. CALCULATE AREA
-
-var areaImage = ee.Image.pixelArea()
-  .divide(10000)
-  .addBands(lulc2019);
-
-var area2019 = areaImage.reduceRegion({
-
-  reducer: ee.Reducer.sum()
-    .group({
-      groupField: 1,
-      groupName: "class"
-    }),
-
-  geometry: basin.geometry(),
-
+// 3. GENERATE 180 CANDIDATE POINTS
+var candidatePoints = lulc2019.stratifiedSample({
+  numPoints: 30,
+  classBand: 'LULC',
+  region: basin.geometry(),
   scale: 100,
-
-  bestEffort: true,
-
-  maxPixels: 1e13,
-
+  classValues: [0, 1, 2, 3, 4, 5],
+  classPoints: [30, 30, 30, 30, 30, 30],
+  seed: 2019,
+  geometries: true,
+  dropNulls: true,
   tileScale: 4
 });
 
-print(
-  "2019 LULC Area (hectares):",
-  area2019
-);
+// Add class names and year
+var classNames = ee.List([
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland_Wasteland'
+]);
 
+candidatePoints = candidatePoints.map(function(feature) {
+  var classNumber = ee.Number(feature.get('LULC'));
 
-// 7. CLASS INFORMATION
-
-print(
-  "Classes:",
-  "0 Water | 1 Forest | 2 Agriculture | " +
-  "3 Built-up | 4 Barren | 5 Grassland/Wasteland"
-);
-
-
-// 8. EXPORT 2019 LULC
-
-Export.image.toDrive({
-
-  image: lulc2019.toByte(),
-
-  description: "Godavari_LULC_2019",
-
-  folder: "Godavari_LULC",
-
-  fileNamePrefix: "Godavari_LULC_2019",
-
-  region: basin.geometry(),
-
-  scale: 10,
-
-  maxPixels: 1e13
-
+  return feature.set({
+    'class_name': classNames.get(classNumber),
+    'year': 2019
+  });
 });
 
-// ==========================================
-// GODAVARI BASIN - 2019 SENTINEL-2 EVIDENCE
-// ==========================================
+print('2019 Candidate Point Count:', candidatePoints.size());
+print('2019 Candidate Class Counts:',
+  candidatePoints.aggregate_histogram('LULC'));
 
-// Load Sentinel-2 imagery
+Map.addLayer(candidatePoints, {
+  color: 'yellow'
+}, '2019 Candidate Points');
+
+// 4. SENTINEL-2 IMAGERY
 var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
   .filterBounds(basin)
   .filterDate('2019-01-01', '2020-01-01')
   .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30));
 
-// Create median composite
+print('Sentinel-2 image count:', s2.size());
+
+// Median composite
 var composite = s2.median().clip(basin);
 
-// Calculate NDVI and NDWI
+// 5. CALCULATE SPECTRAL INDICES
 var ndvi = composite.normalizedDifference(['B8', 'B4'])
   .rename('NDVI');
 
 var ndwi = composite.normalizedDifference(['B3', 'B8'])
   .rename('NDWI');
 
-// Combine bands and indices
+// 6. COMBINE EVIDENCE BANDS
 var evidenceImage = composite
   .select(['B2', 'B3', 'B4', 'B8'])
   .addBands(ndvi)
   .addBands(ndwi);
 
-// Extract values at candidate points
+// 7. EXTRACT VALUES AT 180 CANDIDATE POINTS
 var evidence = evidenceImage.sampleRegions({
   collection: candidatePoints,
   properties: ['LULC', 'class_name', 'year'],
@@ -181,13 +122,19 @@ var evidence = evidenceImage.sampleRegions({
   tileScale: 4
 });
 
-// Display results
 print('2019 Evidence Count:', evidence.size());
 print('2019 Evidence Preview:', evidence.limit(10));
 
-// Export CSV
+// 8. EXPORT COMBINED EVIDENCE CSV
 Export.table.toDrive({
   collection: evidence,
   description: 'Godavari_2019_All180_Evidence_Combined',
+  fileFormat: 'CSV'
+});
+
+// 9. EXPORT CANDIDATE POINTS CSV
+Export.table.toDrive({
+  collection: candidatePoints,
+  description: 'Godavari_2019_Candidate_Points',
   fileFormat: 'CSV'
 });
