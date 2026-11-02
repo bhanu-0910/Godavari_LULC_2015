@@ -1,0 +1,140 @@
+
+// ======================================================
+// GODAVARI BASIN - 2019 LULC EVIDENCE EXTRACTION
+// ======================================================
+
+// 1. LOAD GODAVARI BASIN
+var basin = ee.FeatureCollection(
+  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
+);
+
+Map.centerObject(basin, 7);
+Map.addLayer(basin, {}, 'Godavari Basin');
+
+// 2. DYNAMIC WORLD 2019 
+var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filterBounds(basin)
+  .filterDate('2019-01-01', '2020-01-01')
+  .select('label');
+
+print('Dynamic World 2019 image count:', dw.size());
+
+// Annual mode composite
+var dwMode = dw.mode().clip(basin);
+
+// Original Dynamic World classes:
+// 0 Water, 1 Trees, 2 Grass, 3 Flooded vegetation,
+// 4 Crops, 5 Shrub, 6 Built area, 7 Bare, 8 Snow/Ice
+
+// Project classes:
+// 0 Water, 1 Forest, 2 Agriculture,
+// 3 Built-up, 4 Barren, 5 Grassland/Wasteland
+
+var lulc2019 = dwMode.remap(
+  [0, 1, 2, 3, 4, 5, 6, 7, 8],
+  [0, 1, 5, 0, 2, 5, 3, 4, 4]
+).rename('LULC').toByte();
+
+Map.addLayer(lulc2019, {
+  min: 0,
+  max: 5,
+  palette: [
+    '419BDF',
+    '397D49',
+    'E6C35C',
+    'C4281B',
+    'A59B8F',
+    '88B053'
+  ]
+}, 'Godavari LULC 2019');
+
+// 3. GENERATE 180 CANDIDATE POINTS
+var candidatePoints = lulc2019.stratifiedSample({
+  numPoints: 30,
+  classBand: 'LULC',
+  region: basin.geometry(),
+  scale: 100,
+  classValues: [0, 1, 2, 3, 4, 5],
+  classPoints: [30, 30, 30, 30, 30, 30],
+  seed: 2019,
+  geometries: true,
+  dropNulls: true,
+  tileScale: 4
+});
+
+// Add class names and year
+var classNames = ee.List([
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland_Wasteland'
+]);
+
+candidatePoints = candidatePoints.map(function(feature) {
+  var classNumber = ee.Number(feature.get('LULC'));
+
+  return feature.set({
+    'class_name': classNames.get(classNumber),
+    'year': 2019
+  });
+});
+
+print('2019 Candidate Point Count:', candidatePoints.size());
+print('2019 Candidate Class Counts:',
+  candidatePoints.aggregate_histogram('LULC'));
+
+Map.addLayer(candidatePoints, {
+  color: 'yellow'
+}, '2019 Candidate Points');
+
+// 4. SENTINEL-2 IMAGERY
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(basin)
+  .filterDate('2019-01-01', '2020-01-01')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30));
+
+print('Sentinel-2 image count:', s2.size());
+
+// Median composite
+var composite = s2.median().clip(basin);
+
+// 5. CALCULATE SPECTRAL INDICES
+var ndvi = composite.normalizedDifference(['B8', 'B4'])
+  .rename('NDVI');
+
+var ndwi = composite.normalizedDifference(['B3', 'B8'])
+  .rename('NDWI');
+
+// 6. COMBINE EVIDENCE BANDS
+var evidenceImage = composite
+  .select(['B2', 'B3', 'B4', 'B8'])
+  .addBands(ndvi)
+  .addBands(ndwi);
+
+// 7. EXTRACT VALUES AT 180 CANDIDATE POINTS
+var evidence = evidenceImage.sampleRegions({
+  collection: candidatePoints,
+  properties: ['LULC', 'class_name', 'year'],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+print('2019 Evidence Count:', evidence.size());
+print('2019 Evidence Preview:', evidence.limit(10));
+
+// 8. EXPORT COMBINED EVIDENCE CSV
+Export.table.toDrive({
+  collection: evidence,
+  description: 'Godavari_2019_All180_Evidence_Combined',
+  fileFormat: 'CSV'
+});
+
+// 9. EXPORT CANDIDATE POINTS CSV
+Export.table.toDrive({
+  collection: candidatePoints,
+  description: 'Godavari_2019_Candidate_Points',
+  fileFormat: 'CSV'
+});
