@@ -1,0 +1,121 @@
+
+// ======================================================
+// GODAVARI BASIN - LULC CLASSIFICATION 2021
+// Data Source: Google Dynamic World V1
+// ======================================================
+
+// 1. LOAD GODAVARI BASIN
+var basin = ee.FeatureCollection(
+  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
+);
+
+Map.centerObject(basin, 7);
+Map.addLayer(basin, {color: 'black'}, 'Godavari Basin');
+
+// 2. LOAD DYNAMIC WORLD 2021
+var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+  .filterBounds(basin)
+  .filterDate('2021-01-01', '2022-01-01')
+  .select('label');
+
+print('Dynamic World 2021 Image Count:', dw.size());
+
+// 3. CREATE ANNUAL MODE COMPOSITE
+var dwMode = dw.mode().clip(basin);
+
+// 4. REMAP TO SIX PROJECT CLASSES
+// 0 = Water
+// 1 = Forest
+// 2 = Agriculture
+// 3 = Built-up
+// 4 = Barren
+// 5 = Grassland/Wasteland
+
+var lulc2021 = dwMode.remap(
+  [0, 1, 2, 3, 4, 5, 6, 7, 8],
+  [0, 1, 5, 0, 2, 5, 3, 4, 4]
+).rename('LULC').toByte();
+
+// 5. VISUALIZATION
+var palette = [
+  '419BDF',
+  '397D49',
+  'E6C35C',
+  'C4281B',
+  'A59B8F',
+  '88B053'
+];
+
+Map.addLayer(lulc2021, {
+  min: 0,
+  max: 5,
+  palette: palette
+}, 'Godavari LULC 2021');
+
+// 6. CALCULATE CLASS-WISE AREA
+var areaImage = ee.Image.pixelArea().divide(10000)
+  .rename('Area_ha')
+  .addBands(lulc2021);
+
+var areaStats = areaImage.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'LULC_Class'
+  }),
+  geometry: basin.geometry(),
+  scale: 100,
+  maxPixels: 1e13,
+  tileScale: 4
+});
+
+var classNames = ee.List([
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland_Wasteland'
+]);
+
+var groups = ee.List(areaStats.get('groups'));
+
+var areaTable = ee.FeatureCollection(groups.map(function(item) {
+  item = ee.Dictionary(item);
+
+  var classNumber = ee.Number(item.get('LULC_Class'));
+  var areaHa = ee.Number(item.get('sum'));
+
+  return ee.Feature(null, {
+    'Year': 2021,
+    'Class_ID': classNumber,
+    'Class_Name': classNames.get(classNumber),
+    'Area_ha': areaHa,
+    'Area_km2': areaHa.divide(100)
+  });
+}));
+
+print('2021 Class-wise Area Statistics:', areaTable);
+print('2021 Total Classified Area (ha):',
+  areaTable.aggregate_sum('Area_ha'));
+print('2021 Total Classified Area (km2):',
+  areaTable.aggregate_sum('Area_km2'));
+
+// 7. EXPORT LULC MAP
+Export.image.toDrive({
+  image: lulc2021,
+  description: 'Godavari_LULC_2021',
+  folder: 'Godavari_LULC',
+  fileNamePrefix: 'Godavari_LULC_2021',
+  region: basin.geometry(),
+  scale: 10,
+  maxPixels: 1e13,
+  fileFormat: 'GeoTIFF'
+});
+
+// 8. EXPORT AREA STATISTICS
+Export.table.toDrive({
+  collection: areaTable,
+  description: 'Godavari_LULC_2021_Area_Statistics',
+  folder: 'Godavari_LULC',
+  fileFormat: 'CSV'
+});
