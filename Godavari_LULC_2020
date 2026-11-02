@@ -173,3 +173,53 @@ Export.table.toDrive({
   folder: 'Godavari_LULC',
   fileFormat: 'CSV'
 });
+
+// ======================================================
+// GODAVARI BASIN - 2020 SENTINEL-2 EVIDENCE EXTRACTION
+// ======================================================
+
+// 1. LOAD SENTINEL-2 IMAGERY
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(basin)
+  .filterDate('2020-01-01', '2021-01-01')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30));
+
+print('2020 Sentinel-2 Image Count:', s2.size());
+
+// 2. CREATE MEDIAN COMPOSITE
+var composite = s2.median().clip(basin);
+
+// 3. CALCULATE NDVI
+var ndvi = composite.normalizedDifference(['B8', 'B4'])
+  .rename('NDVI');
+
+// 4. CALCULATE NDWI
+var ndwi = composite.normalizedDifference(['B3', 'B8'])
+  .rename('NDWI');
+
+// 5. COMBINE SPECTRAL BANDS AND INDICES
+var evidenceImage = composite
+  .select(['B2', 'B3', 'B4', 'B8'])
+  .addBands(ndvi)
+  .addBands(ndwi);
+
+// 6. EXTRACT VALUES AT 180 CANDIDATE POINTS
+var evidence = evidenceImage.sampleRegions({
+  collection: candidatePoints,
+  properties: ['LULC', 'class_name', 'year'],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+// 7. CHECK RESULTS
+print('2020 Evidence Count:', evidence.size());
+print('2020 Evidence Preview:', evidence.limit(10));
+
+// 8. EXPORT COMBINED EVIDENCE CSV
+Export.table.toDrive({
+  collection: evidence,
+  description: 'Godavari_2020_All180_Evidence_Combined',
+  folder: 'Godavari_LULC',
+  fileFormat: 'CSV'
+});
