@@ -145,3 +145,49 @@ Export.image.toDrive({
   maxPixels: 1e13
 
 });
+
+// ==========================================
+// GODAVARI BASIN - 2019 SENTINEL-2 EVIDENCE
+// ==========================================
+
+// Load Sentinel-2 imagery
+var s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
+  .filterBounds(basin)
+  .filterDate('2019-01-01', '2020-01-01')
+  .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 30));
+
+// Create median composite
+var composite = s2.median().clip(basin);
+
+// Calculate NDVI and NDWI
+var ndvi = composite.normalizedDifference(['B8', 'B4'])
+  .rename('NDVI');
+
+var ndwi = composite.normalizedDifference(['B3', 'B8'])
+  .rename('NDWI');
+
+// Combine bands and indices
+var evidenceImage = composite
+  .select(['B2', 'B3', 'B4', 'B8'])
+  .addBands(ndvi)
+  .addBands(ndwi);
+
+// Extract values at candidate points
+var evidence = evidenceImage.sampleRegions({
+  collection: candidatePoints,
+  properties: ['LULC', 'class_name', 'year'],
+  scale: 10,
+  geometries: true,
+  tileScale: 4
+});
+
+// Display results
+print('2019 Evidence Count:', evidence.size());
+print('2019 Evidence Preview:', evidence.limit(10));
+
+// Export CSV
+Export.table.toDrive({
+  collection: evidence,
+  description: 'Godavari_2019_All180_Evidence_Combined',
+  fileFormat: 'CSV'
+});
