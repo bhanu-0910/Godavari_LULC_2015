@@ -119,3 +119,59 @@ Export.table.toDrive({
   folder: 'Godavari_LULC',
   fileFormat: 'CSV'
 });
+
+// ======================================================
+// GODAVARI BASIN - 2021 CANDIDATE POINT GENERATION
+// ======================================================
+
+// 1. GENERATE 180 CANDIDATE POINTS
+var candidatePoints = lulc2021.stratifiedSample({
+  numPoints: 30,
+  classBand: 'LULC',
+  region: basin.geometry(),
+  scale: 100,
+  classValues: [0, 1, 2, 3, 4, 5],
+  classPoints: [30, 30, 30, 30, 30, 30],
+  seed: 2021,
+  geometries: true,
+  dropNulls: true,
+  tileScale: 4
+});
+
+// 2. ADD CLASS NAMES AND YEAR
+var classNames = ee.List([
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland_Wasteland'
+]);
+
+candidatePoints = candidatePoints.map(function(feature) {
+  var classNumber = ee.Number(feature.get('LULC'));
+
+  return feature.set({
+    'class_name': classNames.get(classNumber),
+    'year': 2021
+  });
+});
+
+// 3. CHECK CANDIDATE POINTS
+print('2021 Total Candidate Points:', candidatePoints.size());
+
+print('2021 Class-wise Candidate Counts:',
+  candidatePoints.aggregate_histogram('LULC'));
+
+// 4. DISPLAY POINTS
+Map.addLayer(candidatePoints, {
+  color: 'yellow'
+}, '2021 Candidate Points');
+
+// 5. EXPORT CSV
+Export.table.toDrive({
+  collection: candidatePoints,
+  description: 'Godavari_LULC_2021_Candidate_Points',
+  folder: 'Godavari_LULC',
+  fileFormat: 'CSV'
+});
