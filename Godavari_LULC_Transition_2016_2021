@@ -1,0 +1,134 @@
+
+// GODAVARI BASIN - LULC TRANSITION ANALYSIS (2016-2021)
+
+// 1. Load basin
+var basin = ee.FeatureCollection(
+  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
+);
+
+Map.centerObject(basin, 6);
+Map.addLayer(basin, {}, 'Godavari Basin');
+
+// 2. Function to generate annual LULC map
+function getLULC(year) {
+  var start = ee.Date.fromYMD(year, 1, 1);
+  var end = start.advance(1, 'year');
+
+  var dw = ee.ImageCollection('GOOGLE/DYNAMICWORLD/V1')
+    .filterDate(start, end)
+    .filterBounds(basin)
+    .select('label')
+    .mode()
+    .clip(basin);
+
+  return dw.remap(
+    [0, 1, 2, 3, 4, 5, 6, 7, 8],
+    [0, 1, 5, 0, 2, 5, 3, 4, 4]
+  ).rename('LULC').toInt8();
+}
+
+// 3. Generate 2016 and 2021 maps
+var lulc2016 = getLULC(2016);
+var lulc2021 = getLULC(2021);
+
+var palette = [
+  '419BDF', // Water
+  '397D49', // Forest
+  'E5C34B', // Agriculture
+  'C4281B', // Built-up
+  'A59B8F', // Barren
+  '88B053'  // Grassland/Wasteland
+];
+
+Map.addLayer(lulc2016, {
+  min: 0, max: 5, palette: palette
+}, 'LULC 2016');
+
+Map.addLayer(lulc2021, {
+  min: 0, max: 5, palette: palette
+}, 'LULC 2021');
+
+// 4. Encode transitions
+// Example: 12 = Forest (1) to Agriculture (2)
+
+var transition = lulc2016.multiply(10)
+  .add(lulc2021)
+  .rename('transition')
+  .toInt16();
+
+// 5. Calculate transition areas
+var areaTransition = ee.Image.pixelArea()
+  .rename('area')
+  .addBands(transition);
+
+var result = areaTransition.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: 'transition'
+  }),
+  geometry: basin.geometry(),
+  scale: 100,
+  maxPixels: 1e13,
+  tileScale: 4
+});
+
+var groups = ee.List(result.get('groups'));
+
+var classNames = [
+  'Water',
+  'Forest',
+  'Agriculture',
+  'Built-up',
+  'Barren',
+  'Grassland_Wasteland'
+];
+
+// 6. Convert results into a FeatureCollection
+var features = groups.map(function(item) {
+  item = ee.Dictionary(item);
+
+  var code = ee.Number(item.get('transition')).toInt();
+
+  var fromClass = code.divide(10).floor().toInt();
+  var toClass = code.mod(10).toInt();
+
+  var areaM2 = ee.Number(item.get('sum'));
+
+  return ee.Feature(null, {
+    From_ID: fromClass,
+    From_Class: classNames.get(fromClass),
+    To_ID: toClass,
+    To_Class: classNames.get(toClass),
+    Transition_Code: code,
+    Area_ha: areaM2.divide(10000),
+    Area_km2: areaM2.divide(1000000)
+  });
+});
+
+var transitionTable = ee.FeatureCollection(features);
+
+print('2016-2021 LULC Transition Matrix Data',
+      transitionTable);
+
+print('Total transition area (km²)',
+      transitionTable.aggregate_sum('Area_km2'));
+
+// 7. Export transition statistics
+Export.table.toDrive({
+  collection: transitionTable,
+  description: 'Godavari_LULC_Transition_2016_2021',
+  folder: 'Godavari_LULC',
+  fileNamePrefix: 'Godavari_LULC_Transition_2016_2021',
+  fileFormat: 'CSV'
+});
+
+// 8. Export transition raster
+Export.image.toDrive({
+  image: transition,
+  description: 'Godavari_LULC_Transition_Map_2016_2021',
+  folder: 'Godavari_LULC',
+  fileNamePrefix: 'Godavari_LULC_Transition_Map_2016_2021',
+  region: basin.geometry(),
+  scale: 100,
+  maxPixels: 1e13
+});
