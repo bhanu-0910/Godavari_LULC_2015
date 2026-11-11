@@ -40,3 +40,4 @@ print('Number of common models:', commonModels.size());
 
 Map.centerObject(basin, 6);
 Map.addLayer(basin, {}, 'Godavari Basin');
+print('Common model names:', commonModels);
