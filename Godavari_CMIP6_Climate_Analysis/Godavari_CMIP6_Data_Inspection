@@ -1,26 +1,19 @@
 
-// GODAVARI BASIN - CMIP6 SCENARIO INSPECTION
-
-var basin = ee.FeatureCollection(
-  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
-);
+// GODAVARI - CMIP6 HISTORICAL DATA CHECK
 
 var cmip6 = ee.ImageCollection('NASA/GDDP-CMIP6');
 
-var scenarios = ['historical', 'ssp245', 'ssp585'];
+var historical = cmip6
+  .filterDate('2010-01-01', '2015-01-01')
+  .limit(20);
 
-scenarios.forEach(function(scenario) {
+print('Historical sample count:', historical.size());
+print('Historical sample:', historical.first());
 
-  var collection = cmip6
-    .filterBounds(basin)
-    .filter(ee.Filter.eq('scenario', scenario))
-    .filterDate('2015-01-01', '2016-01-01')
-    .limit(100);
+var future = cmip6
+  .filterDate('2021-01-01', '2022-01-01')
+  .filter(ee.Filter.eq('scenario', 'ssp245'))
+  .limit(20);
 
-  print(scenario + ' image count:', collection.size());
-
-  print(scenario + ' first image:',
-        collection.first());
-
-});
-
+print('Future sample count:', future.size());
+print('Future sample:', future.first());
