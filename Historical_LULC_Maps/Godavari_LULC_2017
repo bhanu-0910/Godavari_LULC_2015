@@ -172,3 +172,98 @@ Export.image.toDrive({
 // ============================================================
 // END
 // ============================================================
+
+/* ============================================================
+   9. HISTORICAL LULC AREA STATISTICS — 2017
+   ============================================================ */
+
+var classIDs2017 = [0, 1, 2, 3, 4, 5];
+
+var classNames2017 = [
+  "Water",
+  "Forest",
+  "Agriculture",
+  "Built-up",
+  "Barren",
+  "Grassland_Wasteland"
+];
+
+// Calculate pixel area in square metres
+var areaImage2017 = ee.Image.pixelArea()
+  .rename("area")
+  .addBands(lulc2017.rename("class"));
+
+// Group area by class
+var areaResult2017 = areaImage2017.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: "class"
+  }),
+  geometry: basin.geometry(),
+  scale: 100,
+  maxPixels: 1e13,
+  tileScale: 4
+});
+
+var areaGroups2017 = ee.List(
+  areaResult2017.get("groups")
+);
+
+// Convert grouped results into a dictionary
+var areaDictionary2017 = ee.Dictionary(
+  areaGroups2017.iterate(function(item, accumulator) {
+
+    item = ee.Dictionary(item);
+
+    var classID = ee.Number(item.get("class"));
+    var areaM2 = ee.Number(item.get("sum"));
+
+    return ee.Dictionary(accumulator).set(
+      classID.format(),
+      areaM2
+    );
+
+  }, ee.Dictionary({}))
+);
+
+// Create six class records
+var areaFeatures2017 = ee.FeatureCollection(
+  classIDs2017.map(function(classID) {
+
+    var areaM2 = ee.Number(
+      areaDictionary2017.get(
+        ee.Number(classID).format(),
+        0
+      )
+    );
+
+    return ee.Feature(null, {
+      Year: 2017,
+      Class_ID: classID,
+      LULC_Class: classNames2017[classID],
+      Area_ha: areaM2.divide(10000),
+      Area_km2: areaM2.divide(1000000)
+    });
+
+  })
+);
+
+print("2017 LULC Area Statistics:", areaFeatures2017);
+
+print(
+  "2017 Total Classified Area (km²):",
+  areaFeatures2017.aggregate_sum("Area_km2")
+);
+
+// Export CSV
+Export.table.toDrive({
+  collection: areaFeatures2017,
+  description: "Godavari_LULC_2017_Area_Statistics",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2017_Area_Statistics",
+  fileFormat: "CSV"
+});
+
+// ============================================================
+// END AREA STATISTICS
+// ============================================================
