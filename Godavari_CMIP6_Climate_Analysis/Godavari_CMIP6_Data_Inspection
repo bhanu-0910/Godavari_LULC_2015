@@ -5,20 +5,28 @@ var basin = ee.FeatureCollection(
   'projects/fine-slice-478618-n5/assets/Godavari_Basin'
 );
 
-var cmip6 = ee.ImageCollection('NASA/GDDP-CMIP6')
-  .filterBounds(basin);
+// Load dataset
+var cmip6 = ee.ImageCollection('NASA/GDDP-CMIP6');
 
-print('CMIP6 Dataset:', cmip6);
-print('Available scenarios:',
-  cmip6.aggregate_histogram('scenario'));
+// Inspect a small sample
+var sample = cmip6
+  .filterBounds(basin)
+  .filterDate('2015-01-01', '2016-01-01')
+  .limit(20);
 
-print('Available climate models:',
-  cmip6.aggregate_histogram('model'));
+print('Sample CMIP6 images:', sample);
+print('Sample image count:', sample.size());
 
-print('Available variables:',
-  ee.Image(cmip6.first()).bandNames());
+// Inspect first image
+var first = ee.Image(sample.first());
 
-print('First image:', cmip6.first());
+print('Available variables:', first.bandNames());
+print('Available properties:', first.propertyNames());
 
+print('Model:', first.get('model'));
+print('Scenario:', first.get('scenario'));
+print('Date:', first.date());
+
+// Map
 Map.centerObject(basin, 6);
 Map.addLayer(basin, {}, 'Godavari Basin');
