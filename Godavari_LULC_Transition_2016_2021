@@ -74,14 +74,14 @@ var result = areaTransition.reduceRegion({
 
 var groups = ee.List(result.get('groups'));
 
-var classNames = [
+var classNames = ee.List([
   'Water',
   'Forest',
   'Agriculture',
   'Built-up',
   'Barren',
   'Grassland_Wasteland'
-];
+]);
 
 // 6. Convert results into a FeatureCollection
 var features = groups.map(function(item) {
