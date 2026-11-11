@@ -27,8 +27,8 @@ var ssp585Models = getModels('ssp585', '2031-01-01');
 
 // Find models common to all three
 var commonModels = historicalModels
-  .intersection(ssp245Models)
-  .intersection(ssp585Models)
+  .filter(ee.Filter.inList('item', ssp245Models))
+  .filter(ee.Filter.inList('item', ssp585Models))
   .sort();
 
 print('Historical models:', historicalModels);
