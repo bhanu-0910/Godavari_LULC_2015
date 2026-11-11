@@ -1,0 +1,55 @@
+
+// GODAVARI - CMIP6 FULL PERIOD MODEL CHECK
+
+var basin = ee.FeatureCollection(
+  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
+);
+
+var cmip6 = ee.ImageCollection('NASA/GDDP-CMIP6');
+
+function getModels(scenario, start, end) {
+  return ee.List(
+    cmip6
+      .filterBounds(basin)
+      .filterDate(start, end)
+      .filter(ee.Filter.eq('scenario', scenario))
+      .aggregate_array('model')
+  ).distinct().sort();
+}
+
+var historical = getModels(
+  'historical', '1995-01-01', '2015-01-01'
+);
+
+var ssp245Near = getModels(
+  'ssp245', '2031-01-01', '2051-01-01'
+);
+
+var ssp245Late = getModels(
+  'ssp245', '2081-01-01', '2101-01-01'
+);
+
+var ssp585Near = getModels(
+  'ssp585', '2031-01-01', '2051-01-01'
+);
+
+var ssp585Late = getModels(
+  'ssp585', '2081-01-01', '2101-01-01'
+);
+
+// Find models available in every period
+var common = historical
+  .filter(ee.Filter.inList('item', ssp245Near))
+  .filter(ee.Filter.inList('item', ssp245Late))
+  .filter(ee.Filter.inList('item', ssp585Near))
+  .filter(ee.Filter.inList('item', ssp585Late));
+
+print('Historical models:', historical.size());
+print('SSP245 near-future models:', ssp245Near.size());
+print('SSP245 late-century models:', ssp245Late.size());
+print('SSP585 near-future models:', ssp585Near.size());
+print('SSP585 late-century models:', ssp585Late.size());
+
+print('Models common across all periods:', common);
+print('Final common model count:', common.size());
+
