@@ -321,3 +321,86 @@ Export.table.toDrive({
 // ============================================================
 // END 2016 EVIDENCE SECTION
 // ============================================================
+
+/* ============================================================
+   6. HISTORICAL LULC AREA STATISTICS — 2016
+   Area in hectares and square kilometres
+   ============================================================ */
+
+// Class information
+var classIDs = [0, 1, 2, 3, 4, 5];
+
+var classNames = [
+  "Water",
+  "Forest",
+  "Agriculture",
+  "Built-up",
+  "Barren",
+  "Grassland_Wasteland"
+];
+
+// Calculate pixel area
+var areaImage2016 = ee.Image.pixelArea()
+  .rename("area")
+  .addBands(lulc2016.rename("class"));
+
+// Calculate area grouped by class
+var areaResult2016 = areaImage2016.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: "class"
+  }),
+  geometry: basin.geometry(),
+  scale: 100,
+  maxPixels: 1e13,
+  tileScale: 4
+});
+
+var areaGroups2016 = ee.List(
+  areaResult2016.get("groups")
+);
+
+// Create a feature for each of the six classes
+var areaFeatures2016 = ee.FeatureCollection(
+  classIDs.map(function(classID) {
+
+    var matchingGroup = areaGroups2016.filter(
+      ee.Filter.eq("class", classID)
+    );
+
+    var areaM2 = ee.Number(
+      ee.Algorithms.If(
+        matchingGroup.size().gt(0),
+        ee.Dictionary(matchingGroup.get(0)).get("sum"),
+        0
+      )
+    );
+
+    var areaHa = areaM2.divide(10000);
+    var areaKm2 = areaM2.divide(1000000);
+
+    return ee.Feature(null, {
+      Year: 2016,
+      Class_ID: classID,
+      LULC_Class: classNames[classID],
+      Area_ha: areaHa,
+      Area_km2: areaKm2
+    });
+  })
+);
+
+print("2016 LULC Area Statistics:", areaFeatures2016);
+
+print(
+  "2016 Total Classified Area (km²):",
+  areaFeatures2016.aggregate_sum("Area_km2")
+);
+
+// Export area statistics as a separate CSV
+Export.table.toDrive({
+  collection: areaFeatures2016,
+  description: "Godavari_LULC_2016_Area_Statistics",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2016_Area_Statistics",
+  fileFormat: "CSV"
+});
