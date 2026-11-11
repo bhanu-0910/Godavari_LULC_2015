@@ -1,0 +1,24 @@
+
+// GODAVARI BASIN - CMIP6 DATA INSPECTION
+
+var basin = ee.FeatureCollection(
+  'projects/fine-slice-478618-n5/assets/Godavari_Basin'
+);
+
+var cmip6 = ee.ImageCollection('NASA/GDDP-CMIP6')
+  .filterBounds(basin);
+
+print('CMIP6 Dataset:', cmip6);
+print('Available scenarios:',
+  cmip6.aggregate_histogram('scenario'));
+
+print('Available climate models:',
+  cmip6.aggregate_histogram('model'));
+
+print('Available variables:',
+  ee.Image(cmip6.first()).bandNames());
+
+print('First image:', cmip6.first());
+
+Map.centerObject(basin, 6);
+Map.addLayer(basin, {}, 'Godavari Basin');
