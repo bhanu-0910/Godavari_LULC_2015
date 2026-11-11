@@ -150,3 +150,93 @@ Export.image.toDrive({
 // ============================================================
 // END
 // ============================================================
+
+/* ============================================================
+   9. HISTORICAL LULC AREA STATISTICS — 2018
+   ============================================================ */
+
+var classIDs2018 = [0, 1, 2, 3, 4, 5];
+
+var classNames2018 = [
+  "Water",
+  "Forest",
+  "Agriculture",
+  "Built-up",
+  "Barren",
+  "Grassland_Wasteland"
+];
+
+var areaImage2018 = ee.Image.pixelArea()
+  .rename("area")
+  .addBands(lulc2018.rename("class"));
+
+var areaResult2018 = areaImage2018.reduceRegion({
+  reducer: ee.Reducer.sum().group({
+    groupField: 1,
+    groupName: "class"
+  }),
+  geometry: basin.geometry(),
+  scale: 100,
+  maxPixels: 1e13,
+  tileScale: 4
+});
+
+var areaGroups2018 = ee.List(
+  areaResult2018.get("groups")
+);
+
+var areaDictionary2018 = ee.Dictionary(
+  areaGroups2018.iterate(function(item, accumulator) {
+
+    item = ee.Dictionary(item);
+
+    var classID = ee.Number(item.get("class"));
+    var areaM2 = ee.Number(item.get("sum"));
+
+    return ee.Dictionary(accumulator).set(
+      classID.format(),
+      areaM2
+    );
+
+  }, ee.Dictionary({}))
+);
+
+var areaFeatures2018 = ee.FeatureCollection(
+  classIDs2018.map(function(classID) {
+
+    var areaM2 = ee.Number(
+      areaDictionary2018.get(
+        ee.Number(classID).format(),
+        0
+      )
+    );
+
+    return ee.Feature(null, {
+      Year: 2018,
+      Class_ID: classID,
+      LULC_Class: classNames2018[classID],
+      Area_ha: areaM2.divide(10000),
+      Area_km2: areaM2.divide(1000000)
+    });
+
+  })
+);
+
+print("2018 LULC Area Statistics:", areaFeatures2018);
+
+print(
+  "2018 Total Classified Area (km²):",
+  areaFeatures2018.aggregate_sum("Area_km2")
+);
+
+Export.table.toDrive({
+  collection: areaFeatures2018,
+  description: "Godavari_LULC_2018_Area_Statistics",
+  folder: "Godavari_LULC",
+  fileNamePrefix: "Godavari_LULC_2018_Area_Statistics",
+  fileFormat: "CSV"
+});
+
+// ============================================================
+// END AREA STATISTICS
+// ============================================================
